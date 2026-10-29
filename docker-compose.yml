@@ -1,0 +1,25 @@
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is not set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is not set in .env}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  bot:
+    build: .
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
