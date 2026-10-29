@@ -26,6 +26,9 @@ async def run(settings: Settings, db_url: str) -> None:
             stats.skipped,
         )
 
+        # Токен перевіряється після імпорту: без нього база все одно має бути готова.
+        if not settings.telegram_bot_token:
+            raise SystemExit("TELEGRAM_BOT_TOKEN is not set: archive imported, bot not started")
         bot = Bot(settings.telegram_bot_token)
         dispatcher = Dispatcher()
         dispatcher.include_router(router)
@@ -39,8 +42,6 @@ def main() -> None:
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
     settings = Settings()
-    if not settings.telegram_bot_token:
-        raise SystemExit("TELEGRAM_BOT_TOKEN is not set")
     db_url = settings.db_url()
     run_migrations(db_url)
     asyncio.run(run(settings, db_url))
