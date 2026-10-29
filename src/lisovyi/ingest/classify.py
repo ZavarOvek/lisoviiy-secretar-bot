@@ -71,27 +71,26 @@ def classify(title: str, text: str, gloves: Collection[str]) -> Classification |
         if rest != title and rest in gloves:
             return Classification(DocumentKind.GLOVE, rest, topic)
 
-    scope = _scope_from_text(text) or _scope_from_title(title)
-    if scope is None:
+    scopes = _scopes_from_text(text)
+    if scopes is None:
+        scopes = _scopes_from_title(title)
+    if len(scopes) != 1:
+        # Нічого не знайшли або знайшли кілька областей: вгадувати не беремося,
+        # і назва не перебиває неоднозначний текст.
         return None
+    scope = scopes.pop()
     kind = DocumentKind.GENERAL if scope == GENERAL_SCOPE else DocumentKind.PART
     return Classification(kind, scope, topic_for(title))
 
 
-def _scope_from_text(text: str) -> str | None:
-    """Область дії з першого речення (серед перших трьох після заголовка), яке каже,
-    для кого документ, і називає область."""
+def _scopes_from_text(text: str) -> set[str] | None:
+    """Області з першого речення (серед перших трьох після заголовка), яке каже,
+    для кого документ, і називає область. None: такого речення немає."""
     _title, _, body = text.strip().partition("\n")
     sentences = [s for s in re.split(r"(?<=[.!?])\s+", body.strip()) if s]
     for sentence in sentences[:SENTENCES_TO_CHECK]:
-        if not ADDRESSEE_MARKER.search(sentence):
-            continue
-        scopes = _scopes_named_in(sentence)
-        if len(scopes) == 1:
-            return scopes.pop()
-        if len(scopes) > 1:
-            # Речення називає кілька областей: вгадувати не беремося.
-            return None
+        if ADDRESSEE_MARKER.search(sentence) and (scopes := _scopes_named_in(sentence)):
+            return scopes
     return None
 
 
@@ -102,9 +101,8 @@ def _scopes_named_in(sentence: str) -> set[str]:
     return scopes
 
 
-def _scope_from_title(title: str) -> str | None:
-    parts = {part.value for part, marker in SCOPE_PART_MARKERS.items() if marker.search(title)}
-    return parts.pop() if len(parts) == 1 else None
+def _scopes_from_title(title: str) -> set[str]:
+    return {part.value for part, marker in SCOPE_PART_MARKERS.items() if marker.search(title)}
 
 
 def topic_for(title: str) -> str:

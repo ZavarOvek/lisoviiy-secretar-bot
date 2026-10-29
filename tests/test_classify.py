@@ -103,9 +103,15 @@ def test_title_is_the_fallback():
     assert classify("Грибний путівник листяного лісу", text, GLOVES).scope == "lystianyi"
 
 
-def test_sentence_naming_two_scopes_is_not_guessed():
+@pytest.mark.parametrize("title", ["Порада", "Небезпеки хвойного лісу"])
+def test_sentence_naming_two_scopes_is_not_guessed(title):
+    # Назва з маркером частини не перебиває неоднозначний текст.
     text = _text("Ця порада для хвойного й листяного лісу.")
-    assert classify("Порада", text, GLOVES) is None
+    assert classify(title, text, GLOVES) is None
+
+
+def test_title_naming_two_parts_is_not_guessed():
+    assert classify("Хвойний і листяний ліс", _text("Для вас."), GLOVES) is None
 
 
 def test_nothing_found_returns_none():
