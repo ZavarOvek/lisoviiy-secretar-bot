@@ -2,6 +2,7 @@ import io
 import json
 import logging
 import shutil
+import zipfile
 
 import docx
 import pytest
@@ -32,6 +33,18 @@ def test_txt_in_neither_encoding_is_unsupported():
     # 0x98 не має символу в cp1251 і не є коректним UTF-8.
     with pytest.raises(UnsupportedDocument, match="neither UTF-8 nor cp1251"):
         extract_text(b"\x98", "a.txt", None)
+
+
+def test_txt_utf8_bom_is_dropped():
+    assert extract_text("Правила толоки".encode("utf-8-sig"), "a.txt", None).text == (
+        "Правила толоки"
+    )
+
+
+def test_txt_in_utf16_is_unsupported():
+    # Без перевірки cp1251 «успішно» декодував би ці байти в сміття з NUL.
+    with pytest.raises(UnsupportedDocument, match="NUL bytes"):
+        extract_text("Правила толоки".encode("utf-16"), "a.txt", None)
 
 
 def _docx_bytes(build) -> bytes:
@@ -85,11 +98,25 @@ def test_corrupt_files_are_unsupported(filename):
         extract_text(b"not really a document", filename, None)
 
 
+def test_docx_with_malformed_xml_is_unsupported():
+    source = zipfile.ZipFile(io.BytesIO(_docx_bytes(lambda document: None)))
+    broken = io.BytesIO()
+    with zipfile.ZipFile(broken, "w") as target:
+        for entry in source.infolist():
+            data = source.read(entry)
+            target.writestr(
+                entry, b"<w:document" if entry.filename == "word/document.xml" else data
+            )
+
+    with pytest.raises(UnsupportedDocument, match="not a readable DOCX"):
+        extract_text(broken.getvalue(), "a.docx", None)
+
+
 def test_pdf_with_text_layer():
     result = extract_text((ARCHIVE / "Карта лісу.pdf").read_bytes(), "Карта лісу.pdf", None)
     assert result.source == TextSource.TEXT
     assert "Легенда карти" in result.text
-    assert result.review_items == ()
+    assert result.review_items == []
 
 
 def test_scan_uses_transcript_matched_by_sha256():

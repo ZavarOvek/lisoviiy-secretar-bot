@@ -8,13 +8,14 @@ import io
 import json
 import logging
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePath
 
 import docx
 import pypdf
 from docx.opc.exceptions import PackageNotFoundError
 from docx.table import Table
+from lxml.etree import XMLSyntaxError
 from pypdf.errors import PyPdfError
 
 from lisovyi.domain import TextSource
@@ -33,7 +34,7 @@ class Extracted:
     text: str
     source: TextSource
     # Тільки для source=ocr: місця, які варто перепитати у звіра.
-    review_items: tuple[ReviewItem, ...] = ()
+    review_items: list[ReviewItem] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -77,7 +78,12 @@ def extract_text(data: bytes, filename: str, transcripts: TranscriptStore | None
 
 
 def _decode_txt(data: bytes, filename: str) -> str:
-    for encoding in ("utf-8", "cp1251"):
+    # cp1251 декодує майже будь-які байти; нульові байти означають UTF-16 або бінарний
+    # файл, і без цієї перевірки вони стали б мовчазними «кракозябрами».
+    if b"\x00" in data:
+        raise UnsupportedDocument(f"{filename}: text contains NUL bytes (UTF-16 or binary)")
+    # utf-8-sig — це UTF-8, що прибирає BOM, який дописує Блокнот.
+    for encoding in ("utf-8-sig", "cp1251"):
         try:
             return data.decode(encoding)
         except UnicodeDecodeError:
@@ -88,7 +94,7 @@ def _decode_txt(data: bytes, filename: str) -> str:
 def _docx_text(data: bytes, filename: str) -> str:
     try:
         document = docx.Document(io.BytesIO(data))
-    except (zipfile.BadZipFile, PackageNotFoundError, KeyError) as exc:
+    except (zipfile.BadZipFile, PackageNotFoundError, KeyError, XMLSyntaxError) as exc:
         raise UnsupportedDocument(f"{filename}: not a readable DOCX ({exc})") from exc
     lines = []
     # Абзаци й таблиці в порядку документа.
@@ -132,4 +138,4 @@ def _pdf_text(data: bytes, filename: str, transcripts: TranscriptStore | None) -
     text = ocr.ocr_pdf(data)
     if not text.strip():
         raise UnsupportedDocument(f"{filename}: OCR found no text")
-    return Extracted(text, TextSource.OCR, tuple(ocr.find_review_items(text)))
+    return Extracted(text, TextSource.OCR, ocr.find_review_items(text))
