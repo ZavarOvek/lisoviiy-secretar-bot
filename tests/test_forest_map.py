@@ -65,9 +65,18 @@ def test_without_list_markers():
     assert parse_forest_map(_map_text(LEGEND)) == EXPECTED
 
 
-def test_description_wrapped_onto_next_line():
-    text = _map_text(["– Під вербою — і листяний ліс, і біля", "річки водночас."])
-    assert parse_forest_map(text) == {"Під вербою": (LY, RI)}
+@pytest.mark.parametrize(
+    "lines",
+    [
+        # Перенесений опис не приклеюється до попередньої рукавички.
+        LEGEND[:5] + ["– Під вербою — і листяний ліс, і біля", "річки водночас."] + LEGEND[6:],
+        # Дефіс замість тире посеред легенди.
+        LEGEND[:3] + ["Під дубом - листяний ліс."] + LEGEND[4:],
+    ],
+)
+def test_malformed_line_anywhere_in_legend_is_an_error(lines):
+    with pytest.raises(MapParseError, match="not '<glove> — <description>'"):
+        parse_forest_map(_map_text(lines))
 
 
 @pytest.mark.parametrize(

@@ -28,24 +28,21 @@ class MapParseError(ValueError):
 
 def parse_forest_map(text: str) -> dict[str, tuple[ForestPart, ...]]:
     """Рукавичка → частини лісу (у порядку `ForestPart`), у порядку легенди."""
-    entries: dict[str, list[str]] = {}
-    last_glove = None
+    forest_map: dict[str, tuple[ForestPart, ...]] = {}
     for raw in _legend_lines(text):
         line = _LIST_MARKER.sub("", raw.strip())
         if not line:  # порожній рядок або маркер «–» окремим рядком
             continue
+        # Кожен рядок легенди — окремий запис. Рядок іншого вигляду (перенесений опис,
+        # дефіс замість тире) не вгадуємо: він міг би тихо змінити частини рукавички.
         match = _ENTRY.match(line)
-        if match:
-            last_glove = match["glove"]
-            if last_glove in entries:
-                raise MapParseError(f"glove {last_glove!r} appears twice in the legend")
-            entries[last_glove] = [match["description"]]
-        elif last_glove is not None:
-            # Опис, перенесений на наступний рядок.
-            entries[last_glove].append(line)
-        else:
+        if not match:
             raise MapParseError(f"legend line is not '<glove> — <description>': {line!r}")
-    return {glove: parts_in(" ".join(lines)) for glove, lines in entries.items()}
+        glove = match["glove"]
+        if glove in forest_map:
+            raise MapParseError(f"glove {glove!r} appears twice in the legend")
+        forest_map[glove] = parts_in(match["description"])
+    return forest_map
 
 
 def _legend_lines(text: str) -> list[str]:
