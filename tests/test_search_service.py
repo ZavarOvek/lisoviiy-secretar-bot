@@ -83,9 +83,7 @@ async def test_active_beast_document_is_searched(sessionmaker):
 
     [beast_doc] = [doc for doc in pack.docs if doc.filename == "мед.txt"]
     assert beast_doc.author_name == "Їжак"
-    assert "[Джерело: мед.txt | рукавичка «Під дубом» | надіслав: Їжак, 29.10.2026]" in (
-        pack.render()
-    )
+    assert ": мед.txt | рукавичка «Під дубом» | надіслав: Їжак, 29.10.2026]" in (pack.render())
 
 
 async def test_reload_picks_up_a_new_glove(sessionmaker):

@@ -76,18 +76,21 @@ class ContextPack:
         return sum(len(doc.text) for doc in self.docs)
 
     def render(self) -> str:
-        """Текст для LLM: рядок про місце (якщо назване) і блок на кожен документ."""
+        """Текст для LLM: рядок про місце (якщо назване) і нумерований блок на кожен документ.
+
+        Блок «[Джерело N: …]» — це `docs[N - 1]`: модель посилається на номери, а не на назви.
+        """
         blocks = []
         place = self._place_line()
         if place:
             blocks.append(place)
-        for doc in self.docs:
-            header = f"[Джерело: {_header_field(doc.filename)} | {_layer_label(doc)}"
+        for number, doc in enumerate(self.docs, start=1):
+            header = f"[Джерело {number}: {_header_field(doc.filename)} | {_layer_label(doc)}"
             if doc.author_id is not None:
-                date = _display_date(doc.created_at) if doc.created_at else "дата невідома"
+                date = display_date(doc.created_at) if doc.created_at else "дата невідома"
                 author = _header_field(doc.author_name or "невідомий звір")
                 header += f" | надіслав: {author}, {date}"
-            blocks.append(f"{header}]\n{doc.text.strip()}")
+            blocks.append(f"{header}]\n{_guard_body(doc.text.strip())}")
         return "\n\n".join(blocks)
 
     def _place_line(self) -> str:
@@ -101,7 +104,8 @@ class ContextPack:
         return f"Місце: {'; '.join(named)}" if named else ""
 
 
-def _display_date(moment: datetime) -> str:
+def display_date(moment: datetime) -> str:
+    """Дата для звірів: дд.мм.рррр за київським часом."""
     # Наївний час не можна перевести в Київ без здогадки про його пояс; з БД
     # (timestamptz) він завжди приходить з поясом.
     if moment.tzinfo is None:
@@ -119,6 +123,23 @@ def _header_field(value: str) -> str:
     і дописати від себе підроблене «[Джерело: …]».
     """
     return " ".join(value.split()).translate(_HEADER_UNSAFE)
+
+
+# Позначка перед рядком тексту, схожим на заголовок блоку.
+FORGED_HEADER_MARK = "› "
+
+
+def _guard_body(text: str) -> str:
+    """Рядок тексту, що після пробілів починається з «[Джерело», отримує `› ` спереду.
+
+    Інакше текст документа звіра міг би відкрити підроблений блок «[Джерело 1: …]».
+    Регістр не важить: «[джерело» модель прочитала б так само. `splitlines`, а не
+    `split("\n")`: окремий `\r` чи U+2028 для моделі теж перенос рядка.
+    """
+    return "\n".join(
+        FORGED_HEADER_MARK + line if line.lstrip().casefold().startswith("[джерело") else line
+        for line in text.splitlines()
+    )
 
 
 def _layer_label(doc: ContextDoc) -> str:

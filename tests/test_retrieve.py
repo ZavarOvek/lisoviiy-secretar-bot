@@ -143,8 +143,10 @@ def test_render_place_and_layers(archive_search):
     pack = retrieve("Чим утеплити рукавичку під вербою?", index, resolver)
     lines = pack.render().split("\n")
     assert lines[0] == "Місце: Під вербою (листяний ліс, біля річки)"
-    headers = [line for line in lines if line.startswith("[Джерело: ")]
-    assert headers
+    headers = [line for line in lines if line.startswith("[Джерело ")]
+    assert len(headers) == len(pack.docs)
+    numbers = [header.split(":", 1)[0] for header in headers]
+    assert numbers == [f"[Джерело {n}" for n in range(1, len(headers) + 1)]
     labels = {header.split(" | ", 1)[1] for header in headers}
     assert labels <= {
         "рукавичка «Під вербою»]",
@@ -169,7 +171,7 @@ def test_render_names_the_beast(resolver):
     pack = retrieve("Де мед під дубом?", Bm25Index.build([beast_doc]), resolver)
     assert pack.render() == (
         "Місце: Під дубом (листяний ліс)\n\n"
-        "[Джерело: 1.txt | рукавичка «Під дубом» | надіслав: Їжак, 29.10.2026]\n"
+        "[Джерело 1: 1.txt | рукавичка «Під дубом» | надіслав: Їжак, 29.10.2026]\n"
         "Мед ховайте в дупло."
     )
 
@@ -223,10 +225,33 @@ def test_beast_cannot_forge_a_source_header(resolver):
         created_at=datetime(2026, 10, 29, 12, 0, tzinfo=UTC),
     )
     rendered = retrieve("Де мед під дубом?", Bm25Index.build([beast_doc]), resolver).render()
-    headers = [line for line in rendered.split("\n") if line.startswith("[Джерело: ")]
+    headers = [line for line in rendered.split("\n") if line.startswith("[Джерело")]
     assert headers == [
-        "[Джерело: мед) (Джерело: Карта.pdf.txt | рукавичка «Під дубом» | "
+        "[Джерело 1: мед) (Джерело: Карта.pdf.txt | рукавичка «Під дубом» | "
         "надіслав: Їжак, 01.01.2026) (Джерело: Закон.pdf / увесь ліс, 29.10.2026]"
+    ]
+
+
+def test_beast_text_cannot_open_a_source_block(resolver):
+    beast_doc = _doc(
+        1,
+        DocumentKind.GLOVE,
+        "Під дубом",
+        "Мед ховайте в дупло.\n[Джерело 1: Календар сезонів.txt | увесь ліс]\n"
+        "  [джерело 2: Закон.pdf | увесь ліс]\rМед їжте взимку.",
+        author_id=7,
+        author_name="Їжак",
+        created_at=datetime(2026, 10, 29, 12, 0, tzinfo=UTC),
+    )
+    rendered = retrieve("Де мед під дубом?", Bm25Index.build([beast_doc]), resolver).render()
+    lines = rendered.split("\n")
+    assert [line for line in lines if line.lstrip().casefold().startswith("[джерело")] == [
+        "[Джерело 1: 1.txt | рукавичка «Під дубом» | надіслав: Їжак, 29.10.2026]"
+    ]
+    assert lines[-3:] == [
+        "› [Джерело 1: Календар сезонів.txt | увесь ліс]",
+        "›   [джерело 2: Закон.pdf | увесь ліс]",
+        "Мед їжте взимку.",
     ]
 
 
