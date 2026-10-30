@@ -5,8 +5,8 @@ import pytest
 from sqlalchemy import func, select, update
 
 from lisovyi.config import PROJECT_ROOT
-from lisovyi.db.models import Document, ForestMapEntry
-from lisovyi.domain import DocumentKind, DocumentStatus
+from lisovyi.db.models import Beast, Document, ForestMapEntry
+from lisovyi.domain import DocumentKind, DocumentStatus, TextSource
 from lisovyi.ingest.importer import ArchiveImportError, ImportStats, import_archive
 
 pytestmark = pytest.mark.db
@@ -132,6 +132,95 @@ async def test_new_glove_document_uses_gloves_of_the_imported_map(sessionmaker, 
         sessionmaker, scope="Під ялиною", topic="statut", status=DocumentStatus.ACTIVE
     )
     assert (active.kind, active.filename) == (DocumentKind.GLOVE, "Статут ОСМД Під ялиною.txt")
+
+
+PINES = "Як не заблукати серед однакових сосен.txt"
+
+
+def _rewrite(path: Path, old: str, new: str) -> None:
+    text = path.read_text(encoding="utf-8")
+    assert old in text
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+async def test_archive_file_with_changed_scope_supersedes_its_old_version(
+    sessionmaker, tmp_path, caplog
+):
+    await _import(sessionmaker)
+    archive = _archive_copy(tmp_path)
+    _rewrite(archive / PINES, "мешканців хвойного лісу", "мешканців листяного лісу")
+
+    with caplog.at_level("WARNING"):
+        stats = await _import(sessionmaker, archive)
+
+    assert stats == ImportStats(inserted=0, replaced=1, skipped=77)
+    old, new = await _documents(sessionmaker, filename=PINES)
+    assert (old.scope, old.status) == ("khvoinyi", DocumentStatus.REPLACED)
+    assert (new.scope, new.topic, new.status) == (
+        "lystianyi",
+        "oriientuvannia",
+        DocumentStatus.ACTIVE,
+    )
+    assert new.replaces_id == old.id
+    assert await _documents(sessionmaker, scope="khvoinyi", status=DocumentStatus.ACTIVE) != []
+    assert (
+        await _documents(
+            sessionmaker, scope="khvoinyi", topic="oriientuvannia", status=DocumentStatus.ACTIVE
+        )
+        == []
+    )
+    # Інший документ не постраждав, тож попереджати нема про що.
+    assert caplog.records == []
+
+
+async def test_changed_file_landing_on_another_files_place_replaces_both(
+    sessionmaker, tmp_path, caplog
+):
+    await _import(sessionmaker)
+    archive = _archive_copy(tmp_path)
+    # Порада хвойного лісу стає порадою листяного: місце (lystianyi, yizha) уже зайняте.
+    _rewrite(archive / "Що їсти в хвойному лісі.txt", "хвойного лісу.", "листяного лісу.")
+
+    with caplog.at_level("WARNING"):
+        stats = await _import(sessionmaker, archive)
+
+    assert stats == ImportStats(inserted=0, replaced=1, skipped=77)
+    [old, new] = await _documents(sessionmaker, filename="Що їсти в хвойному лісі.txt")
+    [other] = await _documents(sessionmaker, filename="Що їсти в листяному лісі.pdf")
+    assert old.status == other.status == DocumentStatus.REPLACED
+    assert (new.scope, new.topic, new.status) == ("lystianyi", "yizha", DocumentStatus.ACTIVE)
+    assert new.replaces_id == old.id
+    [record] = caplog.records
+    assert record.levelname == "WARNING"
+    assert "Що їсти в хвойному лісі.txt" in record.message
+    assert "Що їсти в листяному лісі.pdf" in record.message
+
+
+async def test_beast_document_is_never_matched_by_filename(sessionmaker, tmp_path):
+    await _import(sessionmaker)
+    async with sessionmaker() as session, session.begin():
+        beast = Beast(telegram_id=1, name="Їжак")
+        session.add(beast)
+        await session.flush()
+        session.add(
+            Document(
+                filename=PINES,
+                title="Моя порада",
+                kind=DocumentKind.GLOVE,
+                scope="Під ялиною",
+                topic="moia_porada",
+                text="...",
+                text_source=TextSource.TEXT,
+                sha256="1" * 64,
+                author_id=beast.id,
+            )
+        )
+    archive = _archive_copy(tmp_path)
+    _rewrite(archive / PINES, "мешканців хвойного лісу", "мешканців листяного лісу")
+
+    assert await _import(sessionmaker, archive) == ImportStats(inserted=0, replaced=1, skipped=77)
+    [beast_document] = await _documents(sessionmaker, filename=PINES, author_id=beast.id)
+    assert beast_document.status == DocumentStatus.ACTIVE
 
 
 async def test_failing_file_rolls_back_the_whole_import(sessionmaker, tmp_path):

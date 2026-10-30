@@ -27,8 +27,10 @@ class ArchiveImportError(RuntimeError):
 @dataclass(frozen=True)
 class ImportStats:
     # Кожен файл архіву потрапляє рівно в одну з трьох груп.
-    inserted: int  # новий документ для нової пари (scope, topic)
-    replaced: int  # новий документ, що замінив активний для тієї ж пари
+    inserted: int  # новий файл для нової пари (scope, topic)
+    # нова версія, що замінила активний документ того самого архівного файлу
+    # та/або тієї ж пари (scope, topic)
+    replaced: int
     skipped: int  # такий sha256 уже є в БД з будь-яким статусом
 
 
@@ -107,29 +109,45 @@ class _Importer:
             ocr_confirmed=False if extracted.source == TextSource.OCR else None,
             status=DocumentStatus.ACTIVE,
         )
-        previous = await self.session.scalar(
-            select(Document)
-            .where(
-                Document.scope == classification.scope,
-                Document.topic == classification.topic,
-                Document.status == DocumentStatus.ACTIVE,
-            )
-            .with_for_update()
+        # Попередня версія того самого архівного файлу. Документи звірів за іменем
+        # файлу не зіставляються: звір міг назвати свій файл так само випадково.
+        same_file = await self._active(Document.filename == path.name, Document.author_id.is_(None))
+        # Активний документ того самого місця й теми, якщо класифікація збіглася.
+        same_place = await self._active(
+            Document.scope == classification.scope, Document.topic == classification.topic
         )
-        if previous is None:
+        if same_file is None and same_place is None:
             self.inserted += 1
         else:
-            # Спершу знімаємо стару версію з активних, інакше вставка порушить
+            # Спершу знімаємо старі версії з активних, інакше вставка порушить
             # частковий унікальний індекс (scope, topic) WHERE status = 'active'.
-            previous.status = DocumentStatus.REPLACED
+            if same_file is not None:
+                same_file.status = DocumentStatus.REPLACED
+            if same_place is not None and same_place is not same_file:
+                # Замінюється документ іншого файлу: варто знати, що саме зникло з активних.
+                same_place.status = DocumentStatus.REPLACED
+                log.warning(
+                    "%s replaces %s, which was active for the same scope and topic %s",
+                    path.name,
+                    same_place.filename,
+                    key,
+                )
             await self.session.flush()
-            document.replaces_id = previous.id
+            # replaces_id веде до попередньої версії того самого файлу, якщо вона є.
+            document.replaces_id = (same_file or same_place).id
             self.replaced += 1
         self.session.add(document)
         await self.session.flush()
 
         if forest_map is not None:
             await self._rebuild_forest_map(forest_map, document.id)
+
+    async def _active(self, *conditions) -> Document | None:
+        return await self.session.scalar(
+            select(Document)
+            .where(*conditions, Document.status == DocumentStatus.ACTIVE)
+            .with_for_update()
+        )
 
     async def _gloves_from_db(self) -> list[str]:
         gloves = list(await self.session.scalars(select(ForestMapEntry.glove)))
