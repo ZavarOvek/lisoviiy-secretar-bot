@@ -135,13 +135,26 @@ def _guard_body(text: str) -> str:
     """Рядок тексту, що після пробілів починається з «[Джерело», отримує `› ` спереду.
 
     Інакше текст документа звіра міг би відкрити підроблений блок «[Джерело 1: …]».
-    Регістр не важить: «[джерело» модель прочитала б так само. `splitlines`, а не
-    `split("\n")`: окремий `\r` чи U+2028 для моделі теж перенос рядка.
+    `splitlines`, а не `split("\n")`: окремий `\r` чи U+2028 для моделі теж перенос рядка.
     """
     return "\n".join(
-        FORGED_HEADER_MARK + line if line.lstrip().casefold().startswith("[джерело") else line
+        FORGED_HEADER_MARK + line if _looks_like_header(line) else line
         for line in text.splitlines()
     )
+
+
+# Латинські літери, що виглядають як кириличні: «Джерeло» з латинською e модель прочитає
+# так само, як справжнє.
+_LATIN_LOOKALIKES = str.maketrans("aceiopxyk", "асеіорхук")
+
+
+def _looks_like_header(line: str) -> bool:
+    """Чи прочитає модель рядок як «[Джерело…» з точністю до регістру, пробілів, невидимих
+    символів (U+200B, U+FEFF), повноширинних дужок і латинських двійників літер."""
+    folded = unicodedata.normalize("NFKC", line)
+    folded = "".join(ch for ch in folded if unicodedata.category(ch) != "Cf")
+    folded = folded.lstrip().casefold().translate(_LATIN_LOOKALIKES)
+    return folded.startswith("[джерело")
 
 
 def _layer_label(doc: ContextDoc) -> str:
