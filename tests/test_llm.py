@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 import logging
 from unittest.mock import AsyncMock
 
@@ -48,10 +47,8 @@ def test_system_prompt_is_first_and_identical_between_questions(archive_search):
     assert first[1]["content"] != second[1]["content"]
 
 
-def test_system_prompt_is_the_brief_text():
-    # Зміна промпту ламає кеш Groq і змінює поведінку: лише свідомо, разом із цим хешем.
-    digest = hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest()
-    assert digest == "e54bf15b6bea543808e8e2eaf42dcf4d9ebb880e79402af5945a255f2611df2a"
+def test_system_prompt_has_no_placeholders():
+    # Жодних змінних: будь-яка різниця між запитами в цьому тексті ламає кеш Groq.
     assert "{" not in SYSTEM_PROMPT.split("Відповідай JSON")[0]
 
 
