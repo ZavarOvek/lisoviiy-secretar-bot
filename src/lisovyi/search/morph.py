@@ -20,6 +20,8 @@ STOP_LEMMAS = frozenset({
 # fmt: on
 
 _WORD = re.compile(r"[а-яіїєґ']+")
+# Те саме слово до `normalize`: великі літери й типографські апострофи.
+_WORD_ANY_CASE = re.compile(r"[а-яіїєґ'’ʼ]+", re.IGNORECASE)
 
 
 @cache
@@ -48,6 +50,18 @@ def lemma_set(word: str) -> frozenset[str]:
     if lemmas & STOP_LEMMAS:
         return frozenset()
     return lemmas
+
+
+@lru_cache(maxsize=4096)
+def is_preposition(word: str) -> bool:
+    """Хоч один розбір — прийменник: «під» буває й іменником, але перед місцем це прийменник."""
+    word = normalize(word).strip("'")
+    return bool(word) and any(parse.tag.POS == "PREP" for parse in analyzer().parse(word))
+
+
+def words(text: str) -> list[re.Match[str]]:
+    """Слова тексту з позиціями в NFC-тексті, у тих самих межах, що й `tokens`."""
+    return list(_WORD_ANY_CASE.finditer(unicodedata.normalize("NFC", text)))
 
 
 def tokens(text: str) -> list[frozenset[str]]:

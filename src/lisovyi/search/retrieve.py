@@ -1,5 +1,7 @@
 """Пакет контексту для LLM: документи, розкладені за шарами рукавичка → частина → увесь ліс."""
 
+import re
+import unicodedata
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -9,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from lisovyi.domain import GENERAL_SCOPE, PART_NAMES, DocumentKind, ForestPart
 from lisovyi.search.index import Bm25Index, Scored
-from lisovyi.search.morph import bag, tokens
+from lisovyi.search.morph import bag, is_preposition, lemma_set, words
 from lisovyi.search.places import PlaceResolver
 from lisovyi.search.synonyms import expand
 
@@ -253,9 +255,57 @@ def merge_followup(previous: str | None, message: str, resolver: PlaceResolver) 
     Якщо всі змістовні слова нового повідомлення — назви місць («У соснах»), це уточнення
     попереднього питання. Інакше нове повідомлення — окреме питання.
     """
-    if not previous:
-        return message
-    content = [token for token in tokens(message) if token]
-    if content and all(resolver.is_place_token(token) for token in content):
+    if previous and is_place_followup(message, resolver):
         return f"{previous} {message}"
     return message
+
+
+def is_place_followup(message: str, resolver: PlaceResolver) -> bool:
+    """Чи всі змістовні слова повідомлення — назви місць («У соснах», «А під вербою?»).
+
+    Прийменники не змістовні, навіть якщо мають інший розбір: «під» — ще й іменник.
+    """
+    content = [
+        token
+        for match in words(message)
+        if not is_preposition(match.group()) and (token := lemma_set(match.group()))
+    ]
+    return bool(content) and all(resolver.is_place_token(token) for token in content)
+
+
+def strip_places(text: str, resolver: PlaceResolver) -> str:
+    """Питання без названих місць: «Які гриби біля сосон?» → «Які гриби?».
+
+    Прибирає слово-ключ місця, суміжні з ним слова назв місць («бобрової» в «біля бобрової
+    греблі», «лісі» в «у хвойному лісі») і прийменники безпосередньо перед ними.
+    """
+    found = words(text)
+    lemmas = [lemma_set(match.group()) for match in found]
+    drop = [False] * len(found)
+    for i, token in enumerate(lemmas):
+        if not resolver.is_place_token(token):
+            continue
+        first = last = i
+        while first > 0 and resolver.is_place_name_token(lemmas[first - 1]):
+            first -= 1
+        while last + 1 < len(found) and resolver.is_place_name_token(lemmas[last + 1]):
+            last += 1
+        while first > 0 and is_preposition(found[first - 1].group()):
+            first -= 1
+        drop[first : last + 1] = [True] * (last + 1 - first)
+
+    nfc = unicodedata.normalize("NFC", text)
+    pieces, position = [], 0
+    for match, dropped in zip(found, drop, strict=True):
+        if dropped:
+            pieces.append(nfc[position : match.start()])
+            position = match.end()
+    pieces.append(nfc[position:])
+    stripped = " ".join("".join(pieces).split())
+    stripped = _SPACE_BEFORE_PUNCT.sub(r"\1", stripped)
+    return _DANGLING_PUNCT.sub("", stripped).strip()
+
+
+_SPACE_BEFORE_PUNCT = re.compile(r"\s+([?!.,;:])")
+# Кома, що лишилася перед кінцем речення: «Які гриби, біля сосон?» → «Які гриби?».
+_DANGLING_PUNCT = re.compile(r"[,;:]+(?=[?!.]|$)")

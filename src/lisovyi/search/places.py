@@ -3,7 +3,7 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from lisovyi.domain import ForestPart
+from lisovyi.domain import PART_NAMES, ForestPart
 from lisovyi.search.morph import tokens
 
 # Ключі частин фіксовані разом з enum ForestPart. Ключі рукавичок — ні: їх дає карта.
@@ -28,6 +28,9 @@ class PlaceResolver:
         }
         self._glove_keys = {glove: _glove_key(glove) for glove in forest_map}
         self._place_lemmas = frozenset().union(*self._glove_keys.values(), *PART_KEYS.values())
+        # Усі слова назв місць: «бобрової» з «Біля бобрової греблі», «ліс» з «хвойний ліс».
+        names = [*forest_map, *PART_NAMES.values()]
+        self._name_lemmas = frozenset().union(*(token for name in names for token in tokens(name)))
 
     @property
     def gloves(self) -> list[str]:
@@ -58,6 +61,10 @@ class PlaceResolver:
 
     def is_place_token(self, token: frozenset[str]) -> bool:
         return bool(token & self._place_lemmas)
+
+    def is_place_name_token(self, token: frozenset[str]) -> bool:
+        """Слово з назви якогось місця, не обов'язково ключове («бобрової», «ліс»)."""
+        return bool(token & self._name_lemmas)
 
 
 def _glove_key(glove: str) -> frozenset[str]:
