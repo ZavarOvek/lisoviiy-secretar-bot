@@ -18,7 +18,9 @@ class Settings(BaseSettings):
     groq_model: str = "openai/gpt-oss-120b"
     # Reasoning-токени теж рахуються в ліміт токенів на хвилину.
     groq_reasoning_effort: Literal["low", "medium", "high"] = "low"
-    # Друга модель на 429; порожньо — чекати й повторювати основною.
+    # Друга модель на 429; порожньо — чекати й повторювати основною. Запит до неї той самий:
+    # reasoning_effort і strict json_schema, тож годиться лише модель, що їх підтримує
+    # (openai/gpt-oss-20b). Інша на кожен 429 дасть 400 і «щось пішло не так».
     groq_fallback_model: str = ""
     # Разом із reasoning.
     groq_max_completion_tokens: int = Field(default=1024, gt=0)
