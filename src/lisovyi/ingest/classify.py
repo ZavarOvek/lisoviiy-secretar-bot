@@ -1,6 +1,7 @@
 """Класифікація документа за областю дії (kind + scope) і темою."""
 
 import re
+import unicodedata
 from collections.abc import Collection
 from dataclasses import dataclass
 
@@ -63,6 +64,11 @@ def classify(title: str, text: str, gloves: Collection[str]) -> Classification |
     `gloves` — назви рукавичок з легенди активної карти. None означає, що область дії
     визначити не вдалося.
     """
+    # Назва файлу може прийти в NFD (наприклад, з macOS): «й» і «ї» тоді — дві кодові точки,
+    # і порівняння з назвами рукавичок та префіксами мовчки не спрацювало б.
+    title = unicodedata.normalize("NFC", title)
+    text = unicodedata.normalize("NFC", text)
+    gloves = {unicodedata.normalize("NFC", glove) for glove in gloves}
     if title == MAP_TITLE:
         return Classification(DocumentKind.MAP, GENERAL_SCOPE, MAP_TOPIC)
 

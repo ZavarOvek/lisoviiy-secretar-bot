@@ -5,6 +5,7 @@
 """
 
 import re
+import unicodedata
 
 from lisovyi.domain import ForestPart
 
@@ -29,6 +30,8 @@ class MapParseError(ValueError):
 def parse_forest_map(text: str) -> dict[str, tuple[ForestPart, ...]]:
     """Рукавичка → частини лісу (у порядку `ForestPart`), у порядку легенди."""
     forest_map: dict[str, tuple[ForestPart, ...]] = {}
+    # Назви рукавичок стають scope документів, а classify() порівнює їх у NFC.
+    text = unicodedata.normalize("NFC", text)
     for raw in _legend_lines(text):
         line = _LIST_MARKER.sub("", raw.strip())
         if not line:  # порожній рядок або маркер «–» окремим рядком

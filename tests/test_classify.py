@@ -1,4 +1,5 @@
 import csv
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -120,6 +121,26 @@ def test_nothing_found_returns_none():
 
 def test_map_is_recognised_by_title():
     assert classify("Карта лісу", "", []) == Classification(DocumentKind.MAP, "general", "karta")
+
+
+def _nfd(value: str) -> str:
+    return unicodedata.normalize("NFD", value)
+
+
+@pytest.mark.parametrize(
+    ("title", "text", "gloves"),
+    [
+        ("Їстівне й отруйне", "Їстівне й отруйне\nЦя пам'ятка для всіх мешканців лісу.", []),
+        ("Як утеплити рукавичку в хвойному лісі", "Заголовок\nПорада для вас.", []),
+        ("Статут ОСМД Під ялинкою й сосною", "...", ["Під ялинкою й сосною"]),
+    ],
+)
+def test_nfd_input_is_classified_like_nfc(title, text, gloves):
+    assert _nfd(title) != title  # «й»/«ї» справді розкладаються
+    expected = classify(title, text, gloves)
+    assert expected is not None
+    assert classify(_nfd(title), _nfd(text), gloves) == expected
+    assert classify(title, text, [_nfd(glove) for glove in gloves]) == expected
 
 
 @pytest.mark.parametrize(

@@ -1,3 +1,5 @@
+import unicodedata
+
 import pytest
 
 from lisovyi.config import PROJECT_ROOT
@@ -50,6 +52,11 @@ def test_archive_map():
     forest_map = parse_forest_map(text)
     assert forest_map == EXPECTED
     assert list(forest_map) == list(EXPECTED)
+
+
+def test_nfd_map_gives_nfc_glove_names():
+    text = unicodedata.normalize("NFD", _map_text(["Під ялинкою й сосною — хвойний ліс."]))
+    assert parse_forest_map(text) == {"Під ялинкою й сосною": (KH,)}
 
 
 def test_list_marker_on_its_own_line():
