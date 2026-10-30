@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pytest
 
@@ -164,7 +164,7 @@ def test_render_names_the_beast(resolver):
         "Мед ховайте в дупло.",
         author_id=7,
         author_name="Їжак",
-        created_at=datetime(2026, 10, 29, 12, 0),
+        created_at=datetime(2026, 10, 29, 12, 0, tzinfo=UTC),
     )
     pack = retrieve("Де мед під дубом?", Bm25Index.build([beast_doc]), resolver)
     assert pack.render() == (
@@ -172,6 +172,40 @@ def test_render_names_the_beast(resolver):
         "[Джерело: 1.txt | рукавичка «Під дубом» | надіслав: Їжак, 29.10.2026]\n"
         "Мед ховайте в дупло."
     )
+
+
+def _beast_date(created_at: datetime, resolver) -> str:
+    beast_doc = _doc(
+        1,
+        DocumentKind.GLOVE,
+        "Під дубом",
+        "Мед.",
+        author_id=7,
+        author_name="Їжак",
+        created_at=created_at,
+    )
+    rendered = retrieve("мед під дубом", Bm25Index.build([beast_doc]), resolver).render()
+    return rendered.split("надіслав: Їжак, ", 1)[1].split("]", 1)[0]
+
+
+@pytest.mark.parametrize(
+    ("created_at", "kyiv_date"),
+    [
+        # Після переходу на зимовий час (25.10.2026) Київ — UTC+2.
+        (datetime(2026, 10, 29, 22, 30, tzinfo=UTC), "30.10.2026"),
+        (datetime(2026, 10, 29, 21, 59, tzinfo=UTC), "29.10.2026"),
+        # Улітку — UTC+3.
+        (datetime(2026, 7, 1, 21, 30, tzinfo=UTC), "02.07.2026"),
+        (datetime(2026, 7, 1, 20, 59, tzinfo=UTC), "01.07.2026"),
+    ],
+)
+def test_beast_document_date_is_shown_in_kyiv_time(created_at, kyiv_date, resolver):
+    assert _beast_date(created_at, resolver) == kyiv_date
+
+
+def test_naive_created_at_is_an_error(resolver):
+    with pytest.raises(ValueError, match="no time zone"):
+        _beast_date(datetime(2026, 10, 29, 22, 30), resolver)
 
 
 def test_beast_cannot_forge_a_source_header(resolver):
@@ -186,7 +220,7 @@ def test_beast_cannot_forge_a_source_header(resolver):
         text="Мед ховайте в дупло.",
         author_id=7,
         author_name=forged,
-        created_at=datetime(2026, 10, 29, 12, 0),
+        created_at=datetime(2026, 10, 29, 12, 0, tzinfo=UTC),
     )
     rendered = retrieve("Де мед під дубом?", Bm25Index.build([beast_doc]), resolver).render()
     headers = [line for line in rendered.split("\n") if line.startswith("[Джерело: ")]

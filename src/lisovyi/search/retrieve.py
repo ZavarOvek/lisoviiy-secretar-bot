@@ -5,6 +5,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from zoneinfo import ZoneInfo
 
 from lisovyi.domain import GENERAL_SCOPE, PART_NAMES, DocumentKind, ForestPart
 from lisovyi.search.index import Bm25Index, Scored
@@ -20,6 +21,8 @@ UNPLACED_TOP = 6
 # Режим ask_glove: стільки документів однієї теми з різних рукавичок серед перших ASK_WINDOW.
 ASK_WINDOW = 4
 ASK_MIN_GLOVES = 3
+# Дати для звірів — за київським часом, а не за UTC, у якому їх повертає БД.
+DISPLAY_TZ = ZoneInfo("Europe/Kyiv")
 
 
 class Mode(StrEnum):
@@ -81,7 +84,7 @@ class ContextPack:
         for doc in self.docs:
             header = f"[Джерело: {_header_field(doc.filename)} | {_layer_label(doc)}"
             if doc.author_id is not None:
-                date = doc.created_at.strftime("%d.%m.%Y") if doc.created_at else "дата невідома"
+                date = _display_date(doc.created_at) if doc.created_at else "дата невідома"
                 author = _header_field(doc.author_name or "невідомий звір")
                 header += f" | надіслав: {author}, {date}"
             blocks.append(f"{header}]\n{doc.text.strip()}")
@@ -96,6 +99,14 @@ class ContextPack:
         covered = {part for glove in self.gloves for part in self.glove_parts[glove]}
         named.extend(PART_NAMES[p] for p in self.parts if p not in covered)
         return f"Місце: {'; '.join(named)}" if named else ""
+
+
+def _display_date(moment: datetime) -> str:
+    # Наївний час не можна перевести в Київ без здогадки про його пояс; з БД
+    # (timestamptz) він завжди приходить з поясом.
+    if moment.tzinfo is None:
+        raise ValueError(f"created_at has no time zone: {moment!r}")
+    return moment.astimezone(DISPLAY_TZ).strftime("%d.%m.%Y")
 
 
 _HEADER_UNSAFE = str.maketrans({"[": "(", "]": ")", "|": "/"})
