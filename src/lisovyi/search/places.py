@@ -27,6 +27,7 @@ class PlaceResolver:
             glove: tuple(ForestPart(part) for part in parts) for glove, parts in forest_map.items()
         }
         self._glove_keys = {glove: _glove_key(glove) for glove in forest_map}
+        self._place_lemmas = frozenset().union(*self._glove_keys.values(), *PART_KEYS.values())
 
     @property
     def gloves(self) -> list[str]:
@@ -56,8 +57,7 @@ class PlaceResolver:
         return [part for part in ForestPart if part in allowed]
 
     def is_place_token(self, token: frozenset[str]) -> bool:
-        keys = [*self._glove_keys.values(), *PART_KEYS.values()]
-        return any(token & key for key in keys)
+        return bool(token & self._place_lemmas)
 
 
 def _glove_key(glove: str) -> frozenset[str]:

@@ -10,6 +10,7 @@ from lisovyi.domain import DocumentKind, DocumentStatus
 from lisovyi.search.index import Bm25Index, SearchDocument
 from lisovyi.search.places import PlaceResolver
 from lisovyi.search.retrieve import DEFAULT_CHAR_BUDGET, ContextPack, merge_followup, retrieve
+from lisovyi.search.synonyms import lemmatized_synonyms
 
 
 @dataclass(frozen=True)
@@ -49,10 +50,12 @@ class SearchService:
             )
             for document, author_name in rows
         ]
-        entries = list(await session.scalars(select(ForestMapEntry)))
+        entries = list(await session.scalars(select(ForestMapEntry).order_by(ForestMapEntry.glove)))
         if not entries:
             raise RuntimeError("forest_map is empty: import the forest map before searching")
         resolver = PlaceResolver({entry.glove: entry.parts for entry in entries})
+        # Зіпсована таблиця синонімів має зупинити старт, а не перше питання звіра.
+        lemmatized_synonyms()
         self._state = _State(Bm25Index.build(documents), resolver)
 
     @property
