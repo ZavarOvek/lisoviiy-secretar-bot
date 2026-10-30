@@ -23,6 +23,7 @@ SMALL_MODEL = "openai/gpt-oss-20b"
 # ~2K токенів при ~2,5 символа на токен (вимірювання брифу 02).
 BIG_CHARS = 5000
 QUESTION = "Чим утеплити рукавичку під вербою?"
+MAX_COMPLETION = 64
 
 
 def big_prompt() -> str:
@@ -39,15 +40,17 @@ async def probe(client: AsyncGroq, model: str, content: str) -> dict[str, int]:
     raw = await client.chat.completions.with_raw_response.create(
         model=model,
         messages=[{"role": "user", "content": content}],
-        max_completion_tokens=64,
+        max_completion_tokens=MAX_COMPLETION,
         reasoning_effort="low",
     )
-    usage = raw.parse().usage
+    usage = (await raw.parse()).usage
     return {
         "limit": int(raw.headers["x-ratelimit-limit-tokens"]),
         "remaining": int(raw.headers["x-ratelimit-remaining-tokens"]),
         "prompt_tokens": usage.prompt_tokens,
         "total_tokens": usage.total_tokens,
+        # Groq резервує в TPM prompt + max_completion_tokens ще до відповіді.
+        "reserved": usage.prompt_tokens + MAX_COMPLETION,
     }
 
 
@@ -62,16 +65,18 @@ async def main() -> None:
     big = await probe(client, settings.groq_model, big_prompt())
     small = await probe(client, SMALL_MODEL, "Скажи «так».")
 
-    print(f"{'model':<24} {'limit':>7} {'remaining':>10} {'prompt':>7} {'total':>7}")
+    header = f"{'model':<24} {'limit':>7} {'remaining':>10} {'prompt':>7} {'total':>7}"
+    print(f"{header} {'limit - remaining':>18}")
     for model, row in [(settings.groq_model, big), (SMALL_MODEL, small)]:
         print(
             f"{model:<24} {row['limit']:>7} {row['remaining']:>10} "
-            f"{row['prompt_tokens']:>7} {row['total_tokens']:>7}"
+            f"{row['prompt_tokens']:>7} {row['total_tokens']:>7} "
+            f"{row['limit'] - row['remaining']:>18}"
         )
 
-    # Groq знімає токени запиту з бакета ще до відповіді, тож свій запит у залишку вже є.
-    if_separate = small["limit"] - small["total_tokens"]
-    if_shared = big["remaining"] - small["total_tokens"]
+    # Свій запит у залишку вже є: Groq списує prompt + max_completion_tokens наперед.
+    if_separate = small["limit"] - small["reserved"]
+    if_shared = big["remaining"] - small["reserved"]
     print()
     print(f"{SMALL_MODEL} remaining if buckets are separate: ~{if_separate}")
     print(f"{SMALL_MODEL} remaining if the bucket is shared:  ~{if_shared}")
