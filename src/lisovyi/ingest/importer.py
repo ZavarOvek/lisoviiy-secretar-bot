@@ -150,7 +150,11 @@ class _Importer:
         )
 
     async def _gloves_from_db(self) -> list[str]:
-        gloves = list(await self.session.scalars(select(ForestMapEntry.glove)))
+        gloves = list(
+            await self.session.scalars(
+                select(ForestMapEntry.glove).order_by(ForestMapEntry.position, ForestMapEntry.glove)
+            )
+        )
         if not gloves:
             raise ArchiveImportError(
                 "forest_map is empty: the map was imported earlier but its legend is not in the DB"
@@ -166,8 +170,9 @@ class _Importer:
                 glove=glove,
                 parts=[part.value for part in parts],
                 map_document_id=map_document_id,
+                position=position,
             )
-            for glove, parts in forest_map.items()
+            for position, (glove, parts) in enumerate(forest_map.items())
         )
         await self.session.flush()
         log.info("forest map rebuilt: %d gloves", len(forest_map))

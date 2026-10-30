@@ -57,7 +57,9 @@ class SearchService:
                 )
                 for document, author_name in rows
             ]
-            entries = await session.scalars(select(ForestMapEntry).order_by(ForestMapEntry.glove))
+            entries = await session.scalars(
+                select(ForestMapEntry).order_by(ForestMapEntry.position, ForestMapEntry.glove)
+            )
             forest_map = {entry.glove: list(entry.parts) for entry in entries}
         if not forest_map:
             raise RuntimeError("forest_map is empty: import the forest map before searching")

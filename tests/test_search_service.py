@@ -40,6 +40,22 @@ async def test_index_holds_active_documents_without_the_map(sessionmaker):
     assert len(service.state.resolver.gloves) == 8
 
 
+async def test_gloves_keep_the_legend_order_of_the_map(sessionmaker):
+    await _imported(sessionmaker)
+    service = await _reloaded(sessionmaker)
+    # Порядок легенди «Карти лісу»: хвойний ліс, листяний, річка, узлісся — не алфавіт.
+    assert service.state.resolver.gloves == [
+        "Під ялиною",
+        "У соснах",
+        "Біля мурашника",
+        "Під дубом",
+        "У ліщині",
+        "Під вербою",
+        "Біля бобрової греблі",
+        "На узліссі",
+    ]
+
+
 async def test_replaced_and_deleted_documents_are_not_searched(sessionmaker):
     await _imported(sessionmaker)
     async with sessionmaker() as session, session.begin():

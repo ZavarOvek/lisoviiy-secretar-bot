@@ -8,6 +8,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Index,
+    Integer,
     MetaData,
     String,
     Text,
@@ -87,3 +88,5 @@ class ForestMapEntry(Base):
     glove: Mapped[str] = mapped_column(Text, primary_key=True)
     parts: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=sql_text("'{}'"))
     map_document_id: Mapped[int] = mapped_column(ForeignKey("documents.id"))
+    # Місце в легенді карти: у цьому порядку бот показує кнопки рукавичок.
+    position: Mapped[int] = mapped_column(Integer, server_default=sql_text("0"))

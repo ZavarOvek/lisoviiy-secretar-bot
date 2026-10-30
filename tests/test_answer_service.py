@@ -85,8 +85,16 @@ async def test_ask_glove_offers_every_glove_in_map_order(search):
     reply = await service(search, llm).answer(1, "Коли збори мешканців?")
     llm.assert_not_called()
     assert (reply.text, reply.kind) == (texts.ASK_GLOVE, "ask_glove")
-    assert reply.keyboard == search.state.resolver.gloves
-    assert len(reply.keyboard) == 8
+    assert reply.keyboard == [
+        "Під ялиною",
+        "У соснах",
+        "Біля мурашника",
+        "Під дубом",
+        "У ліщині",
+        "Під вербою",
+        "Біля бобрової греблі",
+        "На узліссі",
+    ]
 
 
 async def test_glove_button_answers_the_saved_question(search):
