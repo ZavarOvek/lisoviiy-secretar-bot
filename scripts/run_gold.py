@@ -8,6 +8,9 @@
 Бюджет — ~100–120K токенів з добових 200K: запускати один раз, повторно — лише провалені:
 
     docker compose run --rm -v "$PWD:/app" bot python scripts/run_gold.py [--only T04,T12]
+
+`--model` підміняє GROQ_MODEL на один прогін і вимикає запасну модель: так видно якість
+саме цієї моделі.
 """
 
 import argparse
@@ -57,9 +60,11 @@ async def ask(answers: AnswerService, chat_id: int, turns: list[str]) -> Reply:
     return reply
 
 
-def record(question: dict[str, Any], reply: Reply) -> dict[str, Any]:
+def record(question: dict[str, Any], reply: Reply, settings: Settings) -> dict[str, Any]:
     return {
         "id": question["id"],
+        "model": settings.groq_model,
+        "fallback_model": settings.groq_fallback_model or None,
         "question": question["turns"][-1],
         "turns": question["turns"],
         "behavior": question["behavior"],
@@ -103,8 +108,10 @@ def summarize(rows: list[dict[str, Any]], gold: dict[str, dict[str, Any]]) -> No
     print("tokens: " + " ".join(f"{key.removesuffix('_tokens')}={n}" for key, n in totals.items()))
 
 
-async def main(only: set[str] | None) -> None:
+async def main(only: set[str] | None, model: str | None) -> None:
     settings = Settings()
+    if model:
+        settings = settings.model_copy(update={"groq_model": model, "groq_fallback_model": ""})
     if not settings.groq_api_key:
         raise SystemExit("GROQ_API_KEY is not set")
     gold = {item["id"]: item for item in json.loads(GOLD.read_text(encoding="utf-8"))}
@@ -139,11 +146,12 @@ async def main(only: set[str] | None) -> None:
         for chat_id, question in enumerate(questions, start=1):
             log.info("%s: %s", question["id"], " → ".join(question["turns"]))
             reply = await ask(answers, chat_id, question["turns"])
-            row = record(question, reply)
+            row = record(question, reply, settings)
             rows.append(row)
             file.write(json.dumps(row, ensure_ascii=False) + "\n")
             file.flush()
     print(f"written: {out.relative_to(PROJECT_ROOT)}")
+    print(f"model: {settings.groq_model}, fallback: {settings.groq_fallback_model or '-'}")
     summarize(rows, gold)
 
 
@@ -153,6 +161,7 @@ if __name__ == "__main__":
     )
     parser = argparse.ArgumentParser(prog="python scripts/run_gold.py")
     parser.add_argument("--only", help="comma-separated gold ids, e.g. T04,T12")
+    parser.add_argument("--model", help="Groq model for this run only; disables the fallback")
     args = parser.parse_args()
     only = {item.strip() for item in args.only.split(",") if item.strip()} if args.only else None
-    asyncio.run(main(only))
+    asyncio.run(main(only, args.model))
