@@ -140,7 +140,7 @@ class _Importer:
         await self.session.flush()
 
         if forest_map is not None:
-            await self._rebuild_forest_map(forest_map, document.id)
+            await rebuild_forest_map(self.session, forest_map, document.id)
 
     async def _active(self, *conditions) -> Document | None:
         return await self.session.scalar(
@@ -161,18 +161,20 @@ class _Importer:
             )
         return gloves
 
-    async def _rebuild_forest_map(
-        self, forest_map: dict[str, tuple[ForestPart, ...]], map_document_id: int
-    ) -> None:
-        await self.session.execute(delete(ForestMapEntry))
-        self.session.add_all(
-            ForestMapEntry(
-                glove=glove,
-                parts=[part.value for part in parts],
-                map_document_id=map_document_id,
-                position=position,
-            )
-            for position, (glove, parts) in enumerate(forest_map.items())
+
+async def rebuild_forest_map(
+    session: AsyncSession, forest_map: dict[str, tuple[ForestPart, ...]], map_document_id: int
+) -> None:
+    """Легенда активної карти в forest_map: стара цілком замінюється новою, у порядку легенди."""
+    await session.execute(delete(ForestMapEntry))
+    session.add_all(
+        ForestMapEntry(
+            glove=glove,
+            parts=[part.value for part in parts],
+            map_document_id=map_document_id,
+            position=position,
         )
-        await self.session.flush()
-        log.info("forest map rebuilt: %d gloves", len(forest_map))
+        for position, (glove, parts) in enumerate(forest_map.items())
+    )
+    await session.flush()
+    log.info("forest map rebuilt: %d gloves", len(forest_map))

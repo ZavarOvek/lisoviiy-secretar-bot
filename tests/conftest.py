@@ -9,9 +9,17 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from lisovyi.config import PROJECT_ROOT
 from lisovyi.db.session import make_engine, make_sessionmaker, run_migrations
+from lisovyi.ingest.parsers import extract_text
 from lisovyi.search.index import Bm25Index
 from lisovyi.search.offline import load_archive
 from lisovyi.search.places import PlaceResolver
+
+
+@pytest.fixture(scope="session")
+def archive_map_text() -> str:
+    """Текст архівної «Карти лісу» (у неї є текстовий шар)."""
+    path = PROJECT_ROOT / "data" / "archive" / "Карта лісу.pdf"
+    return extract_text(path.read_bytes(), path.name, None).text
 
 
 @pytest.fixture(scope="session")

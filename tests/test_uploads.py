@@ -422,3 +422,74 @@ async def test_pick_that_was_not_offered_is_stale(world):
     await press(world, texts.OTHER_VERSION)
     await feed(world, callback_update(f"up:{token}:pick:1"))
     assert last_text(world) == texts.STALE
+
+
+# --- Карта лісу
+
+ON_EDGE = "На узліссі — ні хвойний, ні листяний ліс, і до річки далеко."
+
+
+async def test_map_replacement_through_the_dialogue(world, archive_map_text):
+    await registered(world)
+    text = archive_map_text.replace(ON_EDGE, "На узліссі — хвойний ліс.")
+    await send_file(world, "Карта лісу.txt", text.encode())
+
+    preview = last_text(world)
+    lines = preview.split("\n")
+    assert lines[0] == texts.MAP_PREVIEW
+    assert "Під ялиною — хвойний ліс" in lines
+    assert "Під вербою — листяний ліс і біля річки" in lines
+    assert "На узліссі — хвойний ліс" in lines
+    assert lines[-2:] == [texts.MAP_DIFF, "На узліссі: жодна → хвойний ліс"]
+    assert world.dialogue.service.search.state.resolver.parts_of("На узліссі") == ()
+
+    await press(world, texts.REPLACE_MAP)
+
+    assert last_text(world) == texts.MAP_REPLACED
+    resolver = world.dialogue.service.search.state.resolver
+    assert [p.value for p in resolver.parts_of("На узліссі")] == ["khvoinyi"]
+    [new] = await documents(world, filename="Карта лісу.txt")
+    assert new.status == DocumentStatus.ACTIVE
+
+
+async def test_map_preview_lists_gloves_without_parts_and_added_removed(world, archive_map_text):
+    await registered(world)
+    text = archive_map_text.replace("У соснах — хвойний ліс.", "Під кленом — листяний ліс.")
+    await send_file(world, "Карта лісу.txt", text.encode())
+    lines = last_text(world).split("\n")
+    assert "На узліссі — жодна частина" in lines
+    assert "Додано: Під кленом" in lines
+    assert "Прибрано: У соснах" in lines
+
+
+async def test_same_map_says_nothing_changed(world, archive_map_text):
+    await registered(world)
+    await send_file(world, "Карта лісу.txt", archive_map_text.encode())
+    assert last_text(world).split("\n")[-1] == texts.MAP_SAME
+
+
+async def test_map_cancel_keeps_the_old_map(world, archive_map_text):
+    await registered(world)
+    text = archive_map_text.replace(ON_EDGE, "На узліссі — хвойний ліс.")
+    await send_file(world, "Карта лісу.txt", text.encode())
+    await press(world, texts.CANCEL)
+    assert last_text(world) == texts.CANCELLED
+    assert world.dialogue.service.search.state.resolver.parts_of("На узліссі") == ()
+    assert await documents(world, filename="Карта лісу.txt") == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Карта лісу\nТут немає легенди.",
+        "Карта лісу\nЛегенда карти\nПід ялиною — хвойний ліс.\nДві особливі рукавички",
+        "Карта лісу\nЛегенда карти\nПід ялиною - хвойний ліс.\nУ соснах — хвойний ліс.\n"
+        "Дві особливі рукавички",
+    ],
+    ids=["no-legend", "one-glove", "hyphen-instead-of-dash"],
+)
+async def test_unreadable_map(world, text):
+    await registered(world)
+    await send_file(world, "Карта лісу.txt", text.encode())
+    assert last_text(world) == texts.MAP_UNREADABLE
+    assert world.dialogue.live(42) is None

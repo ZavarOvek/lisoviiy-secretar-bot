@@ -11,7 +11,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from lisovyi.db.models import Beast, Document
-from lisovyi.domain import DocumentKind, DocumentStatus, TextSource
+from lisovyi.domain import GENERAL_SCOPE, DocumentKind, DocumentStatus, ForestPart, TextSource
+from lisovyi.ingest.classify import MAP_TITLE, MAP_TOPIC
+from lisovyi.ingest.importer import rebuild_forest_map
 from lisovyi.ingest.parsers import Extracted
 from lisovyi.search.service import SearchService
 
@@ -200,6 +202,74 @@ class UploadService:
         log.info("document %d rebound as a new version of %d", document_id, target_id)
         await self.search.reload()
         return saved
+
+    async def replace_map(
+        self,
+        beast: BeastInfo,
+        extracted: Extracted,
+        data: bytes,
+        filename: str,
+        forest_map: dict[str, tuple[ForestPart, ...]],
+        *,
+        ocr_confirmed: bool = False,
+    ) -> list[str]:
+        """Нова «Карта лісу» в одній транзакції: стара карта replaced, нова active,
+        forest_map перебудовано. Далі пошук перебудовується й відповідає за новою картою.
+
+        Повертає рукавички, чиї активні документи лишилися поза новою картою. Їх не
+        деактивують: карту можуть виправити назад, і тоді нічого не загубиться.
+        """
+        async with self._sessionmaker() as session:
+            try:
+                async with session.begin():
+                    old = await session.scalar(
+                        select(Document)
+                        .where(
+                            Document.kind == DocumentKind.MAP,
+                            Document.status == DocumentStatus.ACTIVE,
+                        )
+                        .with_for_update()
+                    )
+                    if old is not None:
+                        old.status = DocumentStatus.REPLACED
+                        await session.flush()
+                    document = Document(
+                        filename=filename,
+                        title=MAP_TITLE,
+                        kind=DocumentKind.MAP,
+                        scope=GENERAL_SCOPE,
+                        topic=MAP_TOPIC,
+                        text=extracted.text,
+                        text_source=extracted.source,
+                        sha256=hashlib.sha256(data).hexdigest(),
+                        ocr_confirmed=_ocr_confirmed(extracted, ocr_confirmed),
+                        author_id=beast.id,
+                        status=DocumentStatus.ACTIVE,
+                        replaces_id=old.id if old is not None else None,
+                    )
+                    session.add(document)
+                    await session.flush()
+                    await rebuild_forest_map(session, forest_map, document.id)
+                    orphans = sorted(
+                        set(
+                            await session.scalars(
+                                select(Document.scope).where(
+                                    Document.kind == DocumentKind.GLOVE,
+                                    Document.status == DocumentStatus.ACTIVE,
+                                    Document.scope.not_in(list(forest_map)),
+                                )
+                            )
+                        )
+                    )
+            except IntegrityError as exc:
+                raise ConflictError("the forest map was replaced meanwhile") from exc
+        log.info("beast %d replaced the forest map: %d gloves", beast.telegram_id, len(forest_map))
+        if orphans:
+            log.warning(
+                "gloves with active documents are not on the new map: %s", ", ".join(orphans)
+            )
+        await self.search.reload()
+        return orphans
 
 
 async def _active_for_update(session: AsyncSession, document_id: int) -> Document:

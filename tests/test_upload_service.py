@@ -4,8 +4,9 @@ import pytest
 from sqlalchemy import select
 
 from lisovyi.config import PROJECT_ROOT
-from lisovyi.db.models import Document
-from lisovyi.domain import DocumentKind, DocumentStatus, TextSource
+from lisovyi.db.models import Document, ForestMapEntry
+from lisovyi.domain import DocumentKind, DocumentStatus, ForestPart, TextSource
+from lisovyi.ingest.forest_map import parse_forest_map
 from lisovyi.ingest.importer import import_archive
 from lisovyi.ingest.parsers import Extracted
 from lisovyi.search.service import SearchService
@@ -192,3 +193,64 @@ async def test_ocr_confirmation_is_stored(uploads, sessionmaker):
     [a] = await _by_filename(sessionmaker, "a.pdf")
     [b] = await _by_filename(sessionmaker, "b.pdf")
     assert (a.ocr_confirmed, b.ocr_confirmed) == (True, False)
+
+
+ON_EDGE = "На узліссі — ні хвойний, ні листяний ліс, і до річки далеко."
+
+
+@pytest.mark.db
+async def test_map_replacement(uploads, sessionmaker, archive_map_text):
+    beast = await uploads.register(7, "Їжак")
+    text = archive_map_text.replace(ON_EDGE, "На узліссі — хвойний ліс.")
+    forest_map = parse_forest_map(text)
+    [old] = await _by_filename(sessionmaker, "Карта лісу.pdf")
+
+    orphans = await uploads.replace_map(
+        beast, _text(text), text.encode(), "Карта лісу.txt", forest_map
+    )
+
+    assert orphans == []
+    [old_now] = await _by_filename(sessionmaker, "Карта лісу.pdf")
+    [new] = await _by_filename(sessionmaker, "Карта лісу.txt")
+    assert old_now.status == DocumentStatus.REPLACED
+    assert (new.kind, new.status, new.replaces_id, new.author_id) == (
+        DocumentKind.MAP, DocumentStatus.ACTIVE, old.id, beast.id,
+    )  # fmt: skip
+    async with sessionmaker() as session:
+        entries = list(
+            await session.scalars(select(ForestMapEntry).order_by(ForestMapEntry.position))
+        )
+    assert [e.glove for e in entries] == list(forest_map)
+    assert {e.map_document_id for e in entries} == {new.id}
+    # Пошук одразу відповідає за новою картою.
+    resolver = uploads.search.state.resolver
+    assert resolver.parts_of("На узліссі") == (ForestPart.KHVOINYI,)
+    assert uploads.search.search("Які гриби на узліссі?").allowed_parts == [ForestPart.KHVOINYI]
+
+
+@pytest.mark.db
+async def test_gloves_missing_from_the_new_map_keep_their_documents(
+    uploads, sessionmaker, archive_map_text, caplog
+):
+    beast = await uploads.register(7, "Їжак")
+    text = "\n".join(
+        line for line in archive_map_text.splitlines() if not line.startswith("У соснах —")
+    )
+    forest_map = parse_forest_map(text)
+    assert "У соснах" not in forest_map
+
+    with caplog.at_level("WARNING"):
+        orphans = await uploads.replace_map(
+            beast, _text(text), text.encode(), "Карта лісу.txt", forest_map
+        )
+
+    assert orphans == ["У соснах"]
+    assert "not on the new map: У соснах" in caplog.text
+    async with sessionmaker() as session:
+        active = await session.scalar(
+            select(Document.id)
+            .where(Document.scope == "У соснах", Document.status == DocumentStatus.ACTIVE)
+            .limit(1)
+        )
+    assert active is not None
+    assert "У соснах" not in uploads.search.state.resolver.gloves

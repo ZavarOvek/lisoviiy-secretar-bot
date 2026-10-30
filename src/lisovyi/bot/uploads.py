@@ -28,8 +28,9 @@ from aiogram.utils.chat_action import ChatActionSender
 
 from lisovyi.bot import texts
 from lisovyi.bot.places import all_places, find_place, human_place, place_keyboard
-from lisovyi.domain import TextSource
+from lisovyi.domain import PART_NAMES, DocumentKind, ForestPart, TextSource
 from lisovyi.ingest.classify import UploadClassification, classify_upload, upload_topic
+from lisovyi.ingest.forest_map import MapParseError, parse_forest_map
 from lisovyi.ingest.parsers import Extracted
 from lisovyi.uploads.reading import UploadRejected, read_upload
 from lisovyi.uploads.service import (
@@ -51,6 +52,8 @@ MAX_FILE_BYTES = 20 * 1024 * 1024
 PENDING_TTL = 30 * 60
 OCR_REVIEW_LINES = 10
 OTHER_VERSIONS = 20
+# Карта з меншою кількістю рукавичок означає, що легенду розібрано неправильно.
+MIN_MAP_GLOVES = 2
 CALLBACK_PREFIX = "up:"
 # Довжина фрагмента рядка навколо числа в «поганому зорі».
 SNIPPET_RADIUS = 30
@@ -64,6 +67,7 @@ class Stage(StrEnum):
     OCR = "ocr"
     PLACE = "place"
     VERSION = "version"
+    MAP = "map"
     # Порада записана; лишається лише кнопка «Це нова версія іншої поради?».
     SAVED = "saved"
 
@@ -87,6 +91,8 @@ class PendingUpload:
     saved: SavedDocument | None = None
     # Документи, запропоновані кнопками «Це нова версія іншої поради?».
     offered: list[int] = field(default_factory=list)
+    # Розібрана легенда нової «Карти лісу».
+    forest_map: dict[str, tuple[ForestPart, ...]] | None = None
 
 
 async def download_from_telegram(bot: Bot, file_id: str) -> bytes:
@@ -212,6 +218,8 @@ class UploadDialogue:
             await self._offer_other_versions(bot, pending)
         elif action == "pick":
             await self._rebind(bot, pending, int(argument))
+        elif action == "map_yes":
+            await self._replace_map(bot, pending)
 
     # --- кроки
 
@@ -243,6 +251,9 @@ class UploadDialogue:
         assert pending.extracted is not None
         gloves = self.service.search.state.resolver.gloves
         pending.place = classify_upload(pending.title, pending.extracted.text, gloves)
+        if pending.place is not None and pending.place.kind == DocumentKind.MAP:
+            await self._preview_map(bot, pending)
+            return
         if pending.place is None:
             pending.stage = Stage.PLACE
             keyboard = place_keyboard(all_places(gloves), prefix=_callback(pending, "place:"))
@@ -353,6 +364,45 @@ class UploadDialogue:
         self._drop(pending)
         await _send(bot, pending.chat_id, _replaced_text(pending.beast, saved))
 
+    async def _preview_map(self, bot: Bot, pending: PendingUpload) -> None:
+        assert pending.extracted is not None
+        try:
+            forest_map = parse_forest_map(pending.extracted.text)
+        except MapParseError as exc:
+            log.info("uploaded map %r is unreadable: %s", pending.filename, exc)
+            forest_map = {}
+        if len(forest_map) < MIN_MAP_GLOVES:
+            self._drop(pending)
+            await _send(bot, pending.chat_id, texts.MAP_UNREADABLE)
+            return
+        pending.stage = Stage.MAP
+        pending.forest_map = forest_map
+        resolver = self.service.search.state.resolver
+        current = {glove: resolver.parts_of(glove) for glove in resolver.gloves}
+        buttons = [(texts.REPLACE_MAP, "map_yes"), (texts.CANCEL, "cancel")]
+        await _send(
+            bot, pending.chat_id, map_preview(forest_map, current), _keyboard(pending, buttons)
+        )
+
+    async def _replace_map(self, bot: Bot, pending: PendingUpload) -> None:
+        assert pending.extracted is not None and pending.forest_map is not None
+        assert pending.beast is not None
+        try:
+            await self.service.replace_map(
+                pending.beast,
+                pending.extracted,
+                pending.data,
+                pending.filename,
+                pending.forest_map,
+                ocr_confirmed=pending.ocr_confirmed,
+            )
+        except ConflictError:
+            self._drop(pending)
+            await _send(bot, pending.chat_id, texts.CONFLICT)
+            return
+        self._drop(pending)
+        await _send(bot, pending.chat_id, texts.MAP_REPLACED)
+
     def _drop(self, pending: PendingUpload) -> None:
         if self._pending.get(pending.chat_id) is pending:
             del self._pending[pending.chat_id]
@@ -367,6 +417,7 @@ _ACTIONS = {
     Stage.PLACE: {"place"},
     Stage.VERSION: {"replace", "separate"},
     Stage.SAVED: {"other", "pick"},
+    Stage.MAP: {"map_yes", "cancel"},
 }
 
 
@@ -388,6 +439,40 @@ def _keyboard(
     return InlineKeyboardMarkup(
         inline_keyboard=[row[i : i + per_row] for i in range(0, len(row), per_row)]
     )
+
+
+def map_preview(
+    new: dict[str, tuple[ForestPart, ...]], current: dict[str, tuple[ForestPart, ...]]
+) -> str:
+    """Розібрана нова карта і її різниця з чинною: що додано, прибрано, змінено."""
+    lines = [texts.MAP_PREVIEW]
+    lines += [f"{glove} — {_parts_text(parts, texts.MAP_NO_PART)}" for glove, parts in new.items()]
+    added = [glove for glove in new if glove not in current]
+    removed = [glove for glove in current if glove not in new]
+    changed = [
+        texts.MAP_CHANGED.format(
+            glove=glove,
+            old=_parts_text(current[glove], texts.MAP_NO_PART_SHORT),
+            new=_parts_text(parts, texts.MAP_NO_PART_SHORT),
+        )
+        for glove, parts in new.items()
+        if glove in current and set(parts) != set(current[glove])
+    ]
+    lines.append("")
+    if not (added or removed or changed):
+        lines.append(texts.MAP_SAME)
+        return "\n".join(lines)
+    lines.append(texts.MAP_DIFF)
+    if added:
+        lines.append(texts.MAP_ADDED.format(gloves=", ".join(added)))
+    if removed:
+        lines.append(texts.MAP_REMOVED.format(gloves=", ".join(removed)))
+    lines += changed
+    return "\n".join(lines)
+
+
+def _parts_text(parts: tuple[ForestPart, ...], none: str) -> str:
+    return " і ".join(PART_NAMES[part] for part in parts) or none
 
 
 def _ocr_review(extracted: Extracted) -> str:
