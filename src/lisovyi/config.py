@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
@@ -25,6 +26,9 @@ class Settings(BaseSettings):
 
     archive_dir: Path = PROJECT_ROOT / "data" / "archive"
     transcripts_dir: Path = PROJECT_ROOT / "data" / "transcripts"
+
+    # Сума символів документів у пакеті контексту для LLM.
+    context_char_budget: int = Field(default=6000, gt=0)
 
     def db_url(self) -> str:
         if self.database_url:

@@ -9,6 +9,7 @@ from lisovyi.bot.handlers import router
 from lisovyi.config import Settings
 from lisovyi.db.session import make_engine, make_sessionmaker, run_migrations
 from lisovyi.ingest.importer import import_archive
+from lisovyi.search.service import SearchService
 
 log = logging.getLogger("lisovyi")
 
@@ -26,13 +27,23 @@ async def run(settings: Settings, db_url: str) -> None:
             stats.skipped,
         )
 
+        search = SearchService(settings.context_char_budget)
+        async with sessionmaker() as session:
+            await search.reload(session)
+        log.info(
+            "search index: %d documents, %d gloves",
+            len(search.state.index),
+            len(search.state.resolver.gloves),
+        )
+
         # Токен перевіряється після імпорту: без нього база все одно має бути готова.
         if not settings.telegram_bot_token:
             raise SystemExit("TELEGRAM_BOT_TOKEN is not set: archive imported, bot not started")
         bot = Bot(settings.telegram_bot_token)
         dispatcher = Dispatcher()
         dispatcher.include_router(router)
-        await dispatcher.start_polling(bot, sessionmaker=sessionmaker)
+        # Пошук іде в хендлери як залежність; самі хендлери питань з'являться в брифі 03.
+        await dispatcher.start_polling(bot, sessionmaker=sessionmaker, search=search)
     finally:
         await engine.dispose()
 

@@ -15,5 +15,6 @@ async def test_without_token_archive_is_imported_before_exit(db_url, sessionmake
         await run(settings, db_url)
 
     assert "archive import: inserted=78 replaced=0 skipped=0" in caplog.text
+    assert "search index: 77 documents, 8 gloves" in caplog.text
     async with sessionmaker() as session:
         assert await session.scalar(select(func.count()).select_from(Document)) == 78
