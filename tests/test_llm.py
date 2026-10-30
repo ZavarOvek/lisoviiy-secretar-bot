@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 from unittest.mock import AsyncMock
 
@@ -45,6 +46,12 @@ def test_system_prompt_is_first_and_identical_between_questions(archive_search):
     assert first[1]["role"] == "user"
     assert first[1]["content"].startswith("Питання звіра: Які гриби біля сосон?\n\n")
     assert first[1]["content"] != second[1]["content"]
+
+
+def test_system_prompt_digest():
+    # Зміна промпту змінює поведінку моделі й ламає кеш Groq: лише свідомо, разом із цим хешем.
+    digest = hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest()
+    assert digest == "4d63c6e0c8c1dd36ad0ff3dbb31a506345f90e710b78bed472538be4dce7de04"
 
 
 def test_system_prompt_has_no_placeholders():
