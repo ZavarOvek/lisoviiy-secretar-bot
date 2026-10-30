@@ -94,6 +94,7 @@ class LLMClient:
         max_completion_tokens: int = 1024,
         max_wait: float = MAX_WAIT,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        clock: Callable[[], float] = time.monotonic,
     ):
         self._client = client
         self.model = model
@@ -102,8 +103,11 @@ class LLMClient:
         self.max_completion_tokens = max_completion_tokens
         self.max_wait = max_wait
         self._sleep = sleep
+        self._clock = clock
         # Паралельні виклики при 8K TPM нічого не прискорюють, лише плодять 429.
         self._lock = asyncio.Semaphore(1)
+        # Модель → момент, раніше якого Groq просив не приходити (з retry-after останнього 429).
+        self._not_before: dict[str, float] = {}
 
     async def complete(
         self, messages: list[dict[str, str]], notify: Notify | None = None
@@ -112,20 +116,34 @@ class LLMClient:
 
         Повтор — одразу запасною моделлю, якщо вона задана. Інакше, якщо Groq просить
         чекати не довше `max_wait`, — `notify(WAIT)`, пауза й той самий запит ще раз.
+        У черзі до семафора теж чекаємо не довше `max_wait`, далі — «забагато питань».
         """
-        async with self._lock:
-            try:
-                return await self._call(self.model, messages)
-            except _RateLimited as limited:
-                retry_after = limited.retry_after
-            if self.fallback_model:
-                return await self._call_or_busy(self.fallback_model, messages)
-            if retry_after > self.max_wait:
-                raise LLMBusy
-            if notify is not None:
-                await _notify_quietly(notify, texts.WAIT)
-            await self._sleep(retry_after)
-            return await self._call_or_busy(self.model, messages)
+        try:
+            async with asyncio.timeout(self.max_wait):
+                await self._lock.acquire()
+        except TimeoutError:
+            log.warning("llm queue: waited %.0fs for the previous call, giving up", self.max_wait)
+            raise LLMBusy from None
+        try:
+            return await self._complete(messages, notify)
+        finally:
+            self._lock.release()
+
+    async def _complete(self, messages: list[dict[str, str]], notify: Notify | None) -> Completion:
+        try:
+            return await self._call(self.model, messages)
+        except _RateLimited as limited:
+            retry_after = limited.retry_after
+        if self.fallback_model:
+            return await self._call_or_busy(self.fallback_model, messages)
+        if retry_after > self.max_wait:
+            raise LLMBusy
+        if notify is not None:
+            await _notify_quietly(notify, texts.WAIT)
+        await self._sleep(retry_after)
+        # Чекали рівно стільки, скільки просив Groq.
+        self._not_before.pop(self.model, None)
+        return await self._call_or_busy(self.model, messages)
 
     async def _call_or_busy(self, model: str, messages: list[dict[str, str]]) -> Completion:
         try:
@@ -134,6 +152,12 @@ class LLMClient:
             raise LLMBusy from None
 
     async def _call(self, model: str, messages: list[dict[str, str]]) -> Completion:
+        # Після 429 наступні питання не йдуть до Groq, поки не мине retry-after: інакше
+        # кожне з них отримало б той самий 429, а денний ліміт — ще й годину «за хвилину».
+        remaining = self._not_before.get(model, 0.0) - self._clock()
+        if remaining > 0:
+            log.info("groq %s is rate limited for %.0fs more: not calling", model, remaining)
+            raise _RateLimited(remaining)
         started = time.monotonic()
         try:
             response = await self._client.chat.completions.create(
@@ -147,6 +171,7 @@ class LLMClient:
         except groq.RateLimitError as error:
             retry_after = retry_after_seconds(error.response.headers)
             log.warning("groq 429: model=%s retry_after=%.0fs", model, retry_after)
+            self._not_before[model] = self._clock() + retry_after
             raise _RateLimited(retry_after) from error
         except groq.BadRequestError as error:
             if _error_code(error) == "json_validate_failed":

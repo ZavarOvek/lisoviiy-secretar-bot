@@ -261,14 +261,22 @@ async def test_llm_errors_become_friendly_texts(error, text, kind, search):
     assert (reply.text, reply.kind, reply.sources) == (text, kind, [])
 
 
-async def test_notify_reaches_the_llm(search):
-    llm = FakeLLM(reply_json())
+async def test_intermediate_message_is_sent_once_per_question(search):
+    class WaitingLLM(FakeLLM):
+        async def complete(self, messages, notify=None):
+            await notify(texts.WAIT)
+            return await super().complete(messages, notify)
+
+    llm = WaitingLLM(reply_json(sources=[]), reply_json())
+    sent = []
 
     async def notify(text: str) -> None:
-        pass
+        sent.append(text)
 
-    await service(search, llm).answer(1, "Які гриби біля сосон?", notify)
-    assert llm.calls[0][1] is notify
+    reply = await service(search, llm).answer(1, "Які гриби біля сосон?", notify)
+    assert len(llm.calls) == 2
+    assert sent == [texts.WAIT]
+    assert reply.kind == "answer"
 
 
 # --- пам'ять і черги

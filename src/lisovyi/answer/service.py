@@ -80,6 +80,7 @@ class AnswerService:
         context = [doc.filename for doc in pack.docs]
         usage: Usage | None = None
         raw: list[str] = []
+        notify = _once(notify) if notify is not None else None
         for attempt in range(ATTEMPTS):
             try:
                 completion = await self.llm.complete(messages, notify)
@@ -189,6 +190,20 @@ def truncate(text: str, limit: int) -> str:
     ends = [match.end() for match in _SENTENCE_END.finditer(head + " ")]
     cut = ends[-1] if ends else (head.rfind(" ") if " " in head else len(head))
     return head[:cut].rstrip() + ELLIPSIS
+
+
+def _once(notify: Notify) -> Notify:
+    """Проміжне повідомлення — не більше одного на питання, навіть якщо повторна спроба
+    знову впреться в 429."""
+    sent = False
+
+    async def notify_once(text: str) -> None:
+        nonlocal sent
+        if not sent:
+            sent = True
+            await notify(text)
+
+    return notify_once
 
 
 def _add(total: Usage | None, usage: Usage | None) -> Usage | None:

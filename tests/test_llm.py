@@ -262,3 +262,67 @@ async def test_wait_after_429_holds_the_queue():
     assert calls_after_pause == [1]
     assert len(fake.calls) == 3
     assert fake.max_active == 1
+
+
+# --- пауза після 429 і черга
+
+
+class Clock:
+    def __init__(self):
+        self.now = 100.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+async def test_after_a_long_429_later_questions_do_not_call_groq():
+    fake = FakeGroq(rate_limited("600"), OK)
+    clock = Clock()
+    llm = LLMClient(fake, "main-model", sleep=AsyncMock(), clock=clock)
+    with pytest.raises(LLMBusy):
+        await llm.complete(MESSAGES)
+
+    clock.now += 300
+    with pytest.raises(LLMBusy):
+        await llm.complete(MESSAGES)
+    assert len(fake.calls) == 1
+
+    clock.now += 301
+    await llm.complete(MESSAGES)
+    assert len(fake.calls) == 2
+
+
+async def test_rate_limited_main_model_sends_later_questions_to_the_fallback():
+    fake = FakeGroq(rate_limited("600"), OK, OK)
+    llm = LLMClient(fake, "main-model", fallback_model="spare-model", clock=Clock())
+    await llm.complete(MESSAGES)
+    await llm.complete(MESSAGES)
+    assert fake.models == ["main-model", "spare-model", "spare-model"]
+
+
+async def test_short_remaining_pause_is_waited_out_by_the_next_question():
+    fake = FakeGroq(rate_limited("60"), OK)
+    clock = Clock()
+    sleep = AsyncMock()
+    llm = LLMClient(fake, "main-model", sleep=sleep, clock=clock)
+    with pytest.raises(LLMBusy):
+        await llm.complete(MESSAGES)
+
+    clock.now += 50
+    notify = AsyncMock()
+    await llm.complete(MESSAGES, notify)
+
+    notify.assert_awaited_once_with(texts.WAIT)
+    sleep.assert_awaited_once_with(10.0)
+    assert len(fake.calls) == 2
+
+
+async def test_queue_wait_is_bounded():
+    fake = FakeGroq(OK, OK, delay=0.2)
+    llm = LLMClient(fake, "main-model", max_wait=0.05)
+    first, second = await asyncio.gather(
+        llm.complete(MESSAGES), llm.complete(MESSAGES), return_exceptions=True
+    )
+    assert first.model == "main-model"
+    assert isinstance(second, LLMBusy)
+    assert len(fake.calls) == 1
