@@ -7,7 +7,17 @@ import pytest
 from sqlalchemy import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from lisovyi.config import PROJECT_ROOT
 from lisovyi.db.session import make_engine, make_sessionmaker, run_migrations
+from lisovyi.search.index import Bm25Index
+from lisovyi.search.offline import load_archive
+from lisovyi.search.places import PlaceResolver
+
+
+@pytest.fixture(scope="session")
+def archive_search() -> tuple[Bm25Index, PlaceResolver]:
+    """Пошуковий індекс і резолвер, побудовані з data/archive без БД."""
+    return load_archive(PROJECT_ROOT / "data" / "archive", PROJECT_ROOT / "data" / "transcripts")
 
 
 async def _recreate_database(url: URL) -> None:

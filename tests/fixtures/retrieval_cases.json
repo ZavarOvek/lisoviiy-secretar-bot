@@ -1,0 +1,749 @@
+[
+ {
+  "id": "T01",
+  "turns": [
+   "Коли утеплювати рукавичку під ялиною?"
+  ],
+  "gloves": [
+   "Під ялиною"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Календар сезонів.txt",
+   "Як утеплити рукавичку в хвойному лісі.pdf"
+  ],
+  "must_not_retrieve": [
+   "Як утеплити рукавичку біля річки.pdf",
+   "Як утеплити рукавичку в листяному лісі.docx"
+  ],
+  "source": "gold"
+ },
+ {
+  "id": "T02",
+  "turns": [
+   "Коли треба утеплювати рукавичку?"
+  ],
+  "gloves": [],
+  "parts": null,
+  "mode": "unplaced",
+  "must_retrieve": [
+   "Календар сезонів.txt",
+   "Як утеплити рукавичку в листяному лісі.docx",
+   "Як утеплити рукавичку в хвойному лісі.pdf"
+  ],
+  "must_not_retrieve": [],
+  "source": "gold"
+ },
+ {
+  "id": "T03",
+  "turns": [
+   "Чим утеплити рукавичку біля бобрової греблі?"
+  ],
+  "gloves": [
+   "Біля бобрової греблі"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Як утеплити рукавичку біля річки.pdf"
+  ],
+  "must_not_retrieve": [
+   "Як утеплити рукавичку в листяному лісі.docx",
+   "Як утеплити рукавичку в хвойному лісі.pdf"
+  ],
+  "source": "gold"
+ },
+ {
+  "id": "T04",
+  "turns": [
+   "Чим утеплити рукавичку під вербою?"
+  ],
+  "gloves": [
+   "Під вербою"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Як утеплити рукавичку біля річки.pdf",
+   "Як утеплити рукавичку в листяному лісі.docx"
+  ],
+  "must_not_retrieve": [
+   "Як утеплити рукавичку в хвойному лісі.pdf"
+  ],
+  "source": "gold"
+ },
+ {
+  "id": "T05",
+  "turns": [
+   "Коли Ведмідь лягає в сплячку?"
+  ],
+  "gloves": [],
+  "parts": null,
+  "mode": "unplaced",
+  "must_retrieve": [
+   "Календар сезонів.txt",
+   "Правила співжиття в рукавичці У ліщині.docx"
+  ],
+  "must_not_retrieve": [],
+  "source": "gold"
+ },
+ {
+  "id": "T06",
+  "turns": [
+   "Коли Їжак на узліссі лягає спати на зиму?"
+  ],
+  "gloves": [
+   "На узліссі"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Календар сезонів.txt",
+   "Членські внески рукавички На узліссі.docx"
+  ],
+  "must_not_retrieve": [],
+  "source": "gold"
+ },
+ {
+  "id": "T07",
+  "turns": [
+   "Чи можна перейти річку вбрід біля бобрової греблі, коли гребля відкрита?"
+  ],
+  "gloves": [
+   "Біля бобрової греблі"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Броди і коли бобри відкривають греблю.pdf",
+   "Стежки до сусідів від рукавички Біля бобрової греблі.txt"
+  ],
+  "must_not_retrieve": [],
+  "source": "gold"
+ },
+ {
+  "id": "T08",
+  "turns": [
+   "Як перейти річку від верби?"
+  ],
+  "gloves": [
+   "Під вербою"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Броди і коли бобри відкривають греблю.pdf"
+  ],
+  "must_not_retrieve": [],
+  "source": "gold"
+ },
+ {
+  "id": "T09",
+  "turns": [
+   "Коли збирати жолуді під дубом?"
+  ],
+  "gloves": [
+   "Під дубом"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Коли падають жолуді й горіхи.pdf",
+   "Чим поживитись поруч із рукавичкою Під дубом.pdf"
+  ],
+  "must_not_retrieve": [],
+  "source": "gold"
+ },
+ {
+  "id": "T10",
+  "turns": [
+   "Коли падають горіхи біля нас у соснах?"
+  ],
+  "gloves": [
+   "У соснах"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Календар сезонів.txt"
+  ],
+  "must_not_retrieve": [
+   "Коли падають жолуді й горіхи.pdf",
+   "Що їсти в листяному лісі.pdf"
+  ],
+  "source": "gold"
+ },
+ {
+  "id": "T11",
+  "turns": [
+   "Коли збирати горіхи?"
+  ],
+  "gloves": [],
+  "parts": null,
+  "mode": "unplaced",
+  "must_retrieve": [
+   "Календар сезонів.txt",
+   "Коли падають жолуді й горіхи.pdf"
+  ],
+  "must_not_retrieve": [],
+  "source": "gold"
+ },
+ {
+  "id": "T12",
+  "turns": [
+   "Коли йти по гриби під вербою?"
+  ],
+  "gloves": [
+   "Під вербою"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Грибний путівник біля річки.pdf",
+   "Грибний путівник листяного лісу.pdf"
+  ],
+  "must_not_retrieve": [
+   "Грибний путівник хвойного лісу.pdf"
+  ],
+  "source": "gold"
+ },
+ {
+  "id": "T13",
+  "turns": [
+   "Після дощу можна йти по опеньки біля греблі?"
+  ],
+  "gloves": [
+   "Біля бобрової греблі"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Грибний путівник біля річки.pdf",
+   "Небезпеки біля річки.txt"
+  ],
+  "must_not_retrieve": [],
+  "source": "gold"
+ },
+ {
+  "id": "T14",
+  "turns": [
+   "Чи можна прийти в гості до рукавички під дубом восени ввечері?"
+  ],
+  "gloves": [
+   "Під дубом"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Небезпеки листяного лісу.pdf",
+   "Правила співжиття в рукавичці Під дубом.txt"
+  ],
+  "must_not_retrieve": [],
+  "source": "gold"
+ },
+ {
+  "id": "T15",
+  "turns": [
+   "Як дійти від ялини до дуба?"
+  ],
+  "gloves": [
+   "Під ялиною",
+   "Під дубом"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Стежки до сусідів від рукавички Під дубом.txt",
+   "Стежки до сусідів від рукавички Під ялиною.pdf"
+  ],
+  "must_not_retrieve": [],
+  "source": "gold"
+ },
+ {
+  "id": "T16",
+  "turns": [
+   "Що поїсти Зайчику в соснах?"
+  ],
+  "gloves": [
+   "У соснах"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Небезпеки поруч із рукавичкою У соснах.docx",
+   "Чим поживитись поруч із рукавичкою У соснах.docx"
+  ],
+  "must_not_retrieve": [],
+  "source": "gold"
+ },
+ {
+  "id": "T17",
+  "turns": [
+   "Що означає, коли кричить Сорока?"
+  ],
+  "gloves": [],
+  "parts": null,
+  "mode": "unplaced",
+  "must_retrieve": [
+   "Небезпеки поруч із рукавичкою У ліщині.pdf",
+   "Як кричати, коли бачиш мисливців.pdf"
+  ],
+  "must_not_retrieve": [],
+  "source": "gold"
+ },
+ {
+  "id": "T18",
+  "turns": [
+   "Які гриби біля сосон?"
+  ],
+  "gloves": [
+   "У соснах"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Грибний путівник хвойного лісу.pdf"
+  ],
+  "must_not_retrieve": [
+   "Грибний путівник біля річки.pdf",
+   "Грибний путівник листяного лісу.pdf"
+  ],
+  "source": "gold"
+ },
+ {
+  "id": "T19",
+  "turns": [
+   "Коли збори мешканців?"
+  ],
+  "gloves": [],
+  "parts": null,
+  "mode": "ask_glove",
+  "must_retrieve": [],
+  "must_not_retrieve": [],
+  "source": "gold"
+ },
+ {
+  "id": "T20",
+  "turns": [
+   "Коли збори мешканців?",
+   "У соснах"
+  ],
+  "gloves": [
+   "У соснах"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Статут ОСМД У соснах.pdf"
+  ],
+  "must_not_retrieve": [],
+  "source": "gold"
+ },
+ {
+  "id": "T21",
+  "turns": [
+   "Коли треба утеплювати рукавичку?",
+   "біля мурашника"
+  ],
+  "gloves": [
+   "Біля мурашника"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Як утеплити рукавичку в хвойному лісі.pdf"
+  ],
+  "must_not_retrieve": [
+   "Як утеплити рукавичку біля річки.pdf",
+   "Як утеплити рукавичку в листяному лісі.docx"
+  ],
+  "source": "gold"
+ },
+ {
+  "id": "T22",
+  "turns": [
+   "Коли прилітають лелеки?"
+  ],
+  "gloves": [],
+  "parts": null,
+  "mode": "not_found",
+  "must_retrieve": [],
+  "must_not_retrieve": [],
+  "source": "gold"
+ },
+ {
+  "id": "T23",
+  "turns": [
+   "Де біля мурашника росте малина?"
+  ],
+  "gloves": [
+   "Біля мурашника"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [],
+  "must_not_retrieve": [],
+  "source": "gold"
+ },
+ {
+  "id": "T24",
+  "turns": [
+   "Хто голова ОСМД на узліссі і скільки йому років?"
+  ],
+  "gloves": [
+   "На узліссі"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Статут ОСМД На узліссі.pdf"
+  ],
+  "must_not_retrieve": [],
+  "source": "gold"
+ },
+ {
+  "id": "T25",
+  "turns": [
+   "Скільки внесок у ліщині і що буде, якщо не заплатити?"
+  ],
+  "gloves": [
+   "У ліщині"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Членські внески рукавички У ліщині.pdf"
+  ],
+  "must_not_retrieve": [],
+  "source": "gold"
+ },
+ {
+  "id": "T26",
+  "turns": [
+   "Коли готуватися до холодів у ліщині?"
+  ],
+  "gloves": [
+   "У ліщині"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Як утеплити рукавичку в листяному лісі.docx"
+  ],
+  "must_not_retrieve": [],
+  "source": "gold"
+ },
+ {
+  "id": "T27",
+  "turns": [
+   "Що робити, якщо біля дуба побачив мисливців?"
+  ],
+  "gloves": [
+   "Під дубом"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Як кричати, коли бачиш мисливців.pdf"
+  ],
+  "must_not_retrieve": [],
+  "source": "gold"
+ },
+ {
+  "id": "T28",
+  "turns": [
+   "Які гриби збирати на узліссі?"
+  ],
+  "gloves": [
+   "На узліссі"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Їстівне й отруйне.pdf",
+   "Календар сезонів.txt"
+  ],
+  "must_not_retrieve": [
+   "Грибний путівник біля річки.pdf",
+   "Грибний путівник листяного лісу.pdf",
+   "Грибний путівник хвойного лісу.pdf"
+  ],
+  "source": "gold"
+ },
+ {
+  "id": "T29",
+  "turns": [
+   "Скільки шишок треба здавати як внесок під ялиною?"
+  ],
+  "gloves": [
+   "Під ялиною"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Членські внески рукавички Під ялиною.pdf"
+  ],
+  "must_not_retrieve": [],
+  "source": "gold"
+ },
+ {
+  "id": "T30",
+  "turns": [
+   "Скільки кроків від ліщини до дуба?"
+  ],
+  "gloves": [
+   "У ліщині",
+   "Під дубом"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Стежки до сусідів від рукавички У ліщині.pdf"
+  ],
+  "must_not_retrieve": [],
+  "source": "gold"
+ },
+ {
+  "id": "T31",
+  "turns": [
+   "Що робити при пожежі, якщо я під ялиною?"
+  ],
+  "gloves": [
+   "Під ялиною"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Що робити при пожежі.txt"
+  ],
+  "must_not_retrieve": [],
+  "source": "gold"
+ },
+ {
+  "id": "H01",
+  "turns": [
+   "Де шукати рижики біля мурашника?"
+  ],
+  "gloves": [
+   "Біля мурашника"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Грибний путівник хвойного лісу.pdf"
+  ],
+  "must_not_retrieve": [
+   "Грибний путівник біля річки.pdf",
+   "Грибний путівник листяного лісу.pdf"
+  ],
+  "source": "extra"
+ },
+ {
+  "id": "H02",
+  "turns": [
+   "Що робити, коли чуєш мисливських собак?"
+  ],
+  "gloves": [],
+  "parts": null,
+  "mode": "unplaced",
+  "must_retrieve": [
+   "Як кричати, коли бачиш мисливців.pdf"
+  ],
+  "must_not_retrieve": [],
+  "source": "extra"
+ },
+ {
+  "id": "H03",
+  "turns": [
+   "Хто скарбник у рукавичці під вербою?"
+  ],
+  "gloves": [
+   "Під вербою"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Статут ОСМД Під вербою.docx"
+  ],
+  "must_not_retrieve": [],
+  "source": "extra"
+ },
+ {
+  "id": "H04",
+  "turns": [
+   "Скільки гостей можна приймати під дубом?"
+  ],
+  "gloves": [
+   "Під дубом"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Правила співжиття в рукавичці Під дубом.txt"
+  ],
+  "must_not_retrieve": [],
+  "source": "extra"
+ },
+ {
+  "id": "H05",
+  "turns": [
+   "Чим небезпечна живиця в соснах?"
+  ],
+  "gloves": [
+   "У соснах"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Небезпеки хвойного лісу.txt"
+  ],
+  "must_not_retrieve": [],
+  "source": "extra"
+ },
+ {
+  "id": "H06",
+  "turns": [
+   "Коли бобри відкривають греблю?"
+  ],
+  "gloves": [
+   "Біля бобрової греблі"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Броди і коли бобри відкривають греблю.pdf"
+  ],
+  "must_not_retrieve": [],
+  "source": "extra"
+ },
+ {
+  "id": "H07",
+  "turns": [
+   "Де біля верби ростуть опеньки?"
+  ],
+  "gloves": [
+   "Під вербою"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Чим поживитись поруч із рукавичкою Під вербою.txt"
+  ],
+  "must_not_retrieve": [
+   "Грибний путівник хвойного лісу.pdf"
+  ],
+  "source": "extra"
+ },
+ {
+  "id": "H08",
+  "turns": [
+   "Які ягоди є в хвойному лісі?"
+  ],
+  "gloves": [],
+  "parts": [
+   "khvoinyi"
+  ],
+  "mode": "placed",
+  "must_retrieve": [
+   "Що їсти в хвойному лісі.txt"
+  ],
+  "must_not_retrieve": [
+   "Що їсти біля річки.txt",
+   "Що їсти в листяному лісі.pdf"
+  ],
+  "source": "extra"
+ },
+ {
+  "id": "H09",
+  "turns": [
+   "Як не заблукати в лісі?"
+  ],
+  "gloves": [],
+  "parts": null,
+  "mode": "unplaced",
+  "must_retrieve": [
+   "Як не заблукати серед однакових сосен.txt"
+  ],
+  "must_not_retrieve": [],
+  "source": "extra"
+ },
+ {
+  "id": "H10",
+  "turns": [
+   "Коли буде осіння толока?"
+  ],
+  "gloves": [],
+  "parts": null,
+  "mode": "unplaced",
+  "must_retrieve": [
+   "Правила толоки.txt"
+  ],
+  "must_not_retrieve": [],
+  "source": "extra"
+ },
+ {
+  "id": "H11",
+  "turns": [
+   "Скільки треба платити внесків на узліссі?"
+  ],
+  "gloves": [
+   "На узліссі"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Членські внески рукавички На узліссі.docx"
+  ],
+  "must_not_retrieve": [],
+  "source": "extra"
+ },
+ {
+  "id": "H12",
+  "turns": [
+   "Як дістатися від верби до узлісся?"
+  ],
+  "gloves": [
+   "Під вербою",
+   "На узліссі"
+  ],
+  "parts": null,
+  "mode": "placed",
+  "must_retrieve": [
+   "Стежки до сусідів від рукавички На узліссі.docx",
+   "Стежки до сусідів від рукавички Під вербою.docx"
+  ],
+  "must_not_retrieve": [],
+  "source": "extra"
+ },
+ {
+  "id": "X1",
+  "turns": [
+   "Коли готуватися до холодів?"
+  ],
+  "gloves": [],
+  "parts": null,
+  "mode": "unplaced",
+  "must_retrieve": [
+   "Календар сезонів.txt",
+   "Як утеплити рукавичку в листяному лісі.docx",
+   "Як утеплити рукавичку в хвойному лісі.pdf"
+  ],
+  "must_not_retrieve": [],
+  "source": "extra"
+ },
+ {
+  "id": "X3",
+  "turns": [
+   "Коли звірі засинають на зиму?"
+  ],
+  "gloves": [],
+  "parts": null,
+  "mode": "unplaced",
+  "must_retrieve": [
+   "Календар сезонів.txt"
+  ],
+  "must_not_retrieve": [],
+  "source": "extra"
+ }
+]

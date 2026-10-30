@@ -1,0 +1,181 @@
+from datetime import datetime
+
+import pytest
+
+from lisovyi.domain import DocumentKind
+from lisovyi.search.index import Bm25Index, SearchDocument
+from lisovyi.search.morph import bag, lemma_set
+from lisovyi.search.places import PlaceResolver
+from lisovyi.search.retrieve import Layer, Mode, merge_followup, retrieve
+from lisovyi.search.synonyms import SYNONYMS, expand, lemmatized_synonyms
+
+FOREST_MAP = {
+    "Під ялиною": ["khvoinyi"],
+    "Під дубом": ["lystianyi"],
+    "Під вербою": ["lystianyi", "richka"],
+    "На узліссі": [],
+}
+
+
+@pytest.fixture(scope="module")
+def resolver():
+    return PlaceResolver(FOREST_MAP)
+
+
+# --- синоніми
+
+
+def test_every_synonym_target_occurs_in_the_archive(archive_search):
+    index, _ = archive_search
+    dead = [
+        (word, extra)
+        for word, extra_words in SYNONYMS.items()
+        for extra in extra_words
+        if not lemma_set(extra) & index.vocabulary
+    ]
+    assert dead == []
+
+
+def test_synonym_table_lemmatizes():
+    keys = [key for key, _ in lemmatized_synonyms()]
+    assert len(keys) == len(SYNONYMS)
+    assert any("харч" in key for key in keys)
+
+
+def test_expand_adds_targets_with_weight_one():
+    query = bag("холод холод")
+    expanded = expand(query)
+    assert expanded["холод"] == 2
+    assert expanded["сплячка"] == 1
+    assert expand(bag("сосна")) == bag("сосна")
+
+
+# --- уточнення
+
+
+@pytest.mark.parametrize(
+    ("previous", "message", "expected"),
+    [
+        ("Коли збори мешканців?", "У соснах", "Коли збори мешканців? У соснах"),
+        ("Коли збори мешканців?", "Які гриби біля сосон?", "Які гриби біля сосон?"),
+        (None, "У соснах", "У соснах"),
+        ("Що поїсти восени?", "біля річки", "Що поїсти восени? біля річки"),
+    ],
+)
+def test_merge_followup(previous, message, expected):
+    resolver = PlaceResolver({**FOREST_MAP, "У соснах": ["khvoinyi"]})
+    assert merge_followup(previous, message, resolver) == expected
+
+
+def test_followup_without_content_words_is_not_merged(resolver):
+    assert merge_followup("Коли збори?", "а де?", resolver) == "а де?"
+
+
+# --- інваріанти пакета
+
+
+def _doc(document_id, kind, scope, text, **extra) -> SearchDocument:
+    return SearchDocument(
+        document_id=document_id,
+        filename=f"{document_id}.txt",
+        title=f"Документ {document_id}",
+        kind=kind,
+        scope=scope,
+        topic=f"t{document_id}",
+        text=text,
+        **extra,
+    )
+
+
+SYNTHETIC = [
+    _doc(1, DocumentKind.GLOVE, "Під дубом", "мед мед мед мед мед мед мед"),
+    _doc(2, DocumentKind.PART, "lystianyi", "мед мед мед мед мед"),
+    _doc(3, DocumentKind.GLOVE, "Під ялиною", "мед і шишки"),
+    _doc(4, DocumentKind.PART, "khvoinyi", "мед у хвої"),
+    _doc(5, DocumentKind.GENERAL, "general", "мед для всіх"),
+    _doc(6, DocumentKind.GENERAL, "general", "про інше"),
+]
+
+
+def test_documents_outside_allowed_scopes_never_enter_placed(resolver):
+    index = Bm25Index.build(SYNTHETIC)
+    pack = retrieve("Де взяти мед під ялиною?", index, resolver)
+    assert pack.mode == Mode.PLACED
+    assert [(d.document_id, d.layer) for d in pack.docs] == [
+        (3, Layer.GLOVE),
+        (4, Layer.PART),
+        (5, Layer.GENERAL),
+    ]
+    best = max(index.score_all(bag("мед")), key=lambda s: s.score)
+    assert best.document.document_id == 1  # найвищий рахунок, але чужа рукавичка
+
+
+def test_budget_of_one_keeps_exactly_one_document(archive_search):
+    index, resolver = archive_search
+    pack = retrieve("Коли утеплювати рукавичку під ялиною?", index, resolver, char_budget=1)
+    assert len(pack.docs) == 1
+    assert pack.docs[0].layer == Layer.GLOVE or pack.docs[0].scope == "khvoinyi"
+
+
+def test_not_found_has_no_documents(resolver):
+    pack = retrieve("лелеки", Bm25Index.build(SYNTHETIC), resolver)
+    assert (pack.mode, pack.docs) == (Mode.NOT_FOUND, [])
+
+
+def test_ask_glove_needs_one_topic_from_three_gloves(resolver):
+    docs = [
+        _doc(i, DocumentKind.GLOVE, glove, "статут збори мешканців")
+        for i, glove in enumerate(["Під ялиною", "Під дубом", "Під вербою"], start=1)
+    ]
+    docs = [SearchDocument(**{**d.__dict__, "topic": "statut"}) for d in docs] + [
+        _doc(9, DocumentKind.GENERAL, "general", "інше")
+    ]
+    assert retrieve("Коли збори?", Bm25Index.build(docs), resolver).mode == Mode.ASK_GLOVE
+    two = Bm25Index.build(docs[:2] + docs[3:])
+    assert retrieve("Коли збори?", two, resolver).mode == Mode.UNPLACED
+
+
+# --- рендер
+
+
+def test_render_place_and_layers(archive_search):
+    index, resolver = archive_search
+    pack = retrieve("Чим утеплити рукавичку під вербою?", index, resolver)
+    lines = pack.render().split("\n")
+    assert lines[0] == "Місце: Під вербою (листяний ліс, біля річки)"
+    headers = [line for line in lines if line.startswith("[Джерело: ")]
+    assert headers
+    labels = {header.split(" | ", 1)[1] for header in headers}
+    assert labels <= {
+        "рукавичка «Під вербою»]",
+        "частина лісу: листяний ліс]",
+        "частина лісу: біля річки]",
+        "увесь ліс]",
+    }
+    assert "частина лісу: біля річки]" in labels
+    assert "частина лісу: листяний ліс]" in labels
+
+
+def test_render_names_the_beast(resolver):
+    beast_doc = _doc(
+        1,
+        DocumentKind.GLOVE,
+        "Під дубом",
+        "Мед ховайте в дупло.",
+        author_id=7,
+        author_name="Їжак",
+        created_at=datetime(2026, 10, 29, 12, 0),
+    )
+    pack = retrieve("Де мед під дубом?", Bm25Index.build([beast_doc]), resolver)
+    assert pack.render() == (
+        "Місце: Під дубом (листяний ліс)\n\n"
+        "[Джерело: 1.txt | рукавичка «Під дубом» | надіслав: Їжак, 29.10.2026]\n"
+        "Мед ховайте в дупло."
+    )
+
+
+def test_render_without_place_and_glove_without_parts(resolver):
+    pack = retrieve("мед", Bm25Index.build(SYNTHETIC), resolver)
+    assert not pack.render().startswith("Місце:")
+    pack = retrieve("мед на узліссі", Bm25Index.build(SYNTHETIC), resolver)
+    assert pack.render().startswith("Місце: На узліссі (не належить до жодної частини лісу)")

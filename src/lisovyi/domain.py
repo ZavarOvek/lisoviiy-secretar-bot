@@ -34,3 +34,10 @@ class ForestPart(StrEnum):
 
 
 GENERAL_SCOPE = "general"
+
+# Людські назви частин лісу для текстів, які читають звірі й LLM.
+PART_NAMES = {
+    ForestPart.KHVOINYI: "хвойний ліс",
+    ForestPart.LYSTIANYI: "листяний ліс",
+    ForestPart.RICHKA: "біля річки",
+}
