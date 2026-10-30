@@ -19,7 +19,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    restart: unless-stopped
+    # Без токена бот чесно падає після імпорту; безкінечний перезапуск тут нічого не дасть.
+    restart: on-failure:5
 
 volumes:
   pgdata:
