@@ -10,7 +10,7 @@ from aiogram.client.session.base import BaseSession
 from aiogram.methods import AnswerCallbackQuery, SendChatAction, SendMessage, TelegramMethod
 from aiogram.types import CallbackQuery, Chat, Message, Update, User
 
-from lisovyi.answer.service import Reply
+from lisovyi.answer.service import AnswerService, Reply
 from lisovyi.bot.handlers import (
     CALLBACK_DATA_BYTES,
     PLACE_PREFIX,
@@ -19,6 +19,8 @@ from lisovyi.bot.handlers import (
     router,
     start_text,
 )
+from lisovyi.search import service as search_module
+from lisovyi.search.service import SearchService
 
 GLOVES = ["Біля бобрової греблі", "Біля мурашника", "На узліссі", "Під вербою", "Під дубом",
           "Під ялиною", "У ліщині", "У соснах"]  # fmt: skip
@@ -228,3 +230,20 @@ def test_glove_from_callback():
 
 def test_no_gloves_no_keyboard():
     assert place_keyboard([]) is None
+
+
+async def test_old_glove_button_after_restart_asks_for_the_question(bot, session, archive_search):
+    class NoLLM:
+        async def complete(self, messages, notify=None):
+            raise AssertionError("the model must not be called")
+
+    search = SearchService()
+    search._state = search_module._State(*archive_search)
+    # Свіжий сервіс — порожня пам'ять, як після рестарту; кнопка лишилась в історії чату.
+    answers = AnswerService(search, NoLLM(), dialogue_ttl=900)
+    await DISPATCHER.feed_update(
+        bot, _callback(PLACE_PREFIX + "Під дубом"), answers=answers, search=search
+    )
+    assert session.sent(SendMessage)[-1].text.startswith(
+        "Що саме хочеш дізнатися про рукавичку «Під дубом»?"
+    )

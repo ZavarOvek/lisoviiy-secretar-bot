@@ -17,17 +17,22 @@ class DialogueMemory:
         # chat_id → (базове питання, час останньої репліки).
         self._turns: dict[int, tuple[str, float]] = {}
 
-    def merge(self, chat_id: int, message: str, resolver: PlaceResolver) -> str:
+    def merge(self, chat_id: int, message: str, resolver: PlaceResolver) -> str | None:
         """Питання для пошуку з урахуванням попередньої репліки.
 
         Уточнення місця («А біля дубів?») в межах TTL дає базове питання без його місця плюс
         нове місце. Базове питання при цьому не змінюється, тож друге уточнення поспіль
         знову спирається на нього. Будь-яке інше повідомлення стає новим базовим питанням.
+
+        None — лише місце, а уточнювати нічого (рестарт, TTL, стара кнопка в історії чату).
+        Таке повідомлення базою не стає: питати про саме місце нема чого.
         """
         now = self._clock()
         self._forget_expired(now)
-        saved = self._turns.get(chat_id)
-        if saved is not None and is_place_followup(message, resolver):
+        if is_place_followup(message, resolver):
+            saved = self._turns.get(chat_id)
+            if saved is None:
+                return None
             base = saved[0]
             self._turns[chat_id] = (base, now)
             return f"{strip_places(base, resolver)} {message}".strip()

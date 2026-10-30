@@ -12,6 +12,7 @@ from lisovyi.answer import texts
 from lisovyi.answer.dialogue import DialogueMemory
 from lisovyi.answer.llm import Completion, LLMClient, LLMError, Notify, OutputRejected, Usage
 from lisovyi.answer.prompt import KINDS, build_messages
+from lisovyi.search.places import Places
 from lisovyi.search.retrieve import ContextDoc, ContextPack, Mode, display_date
 from lisovyi.search.service import SearchService
 
@@ -32,7 +33,8 @@ class Reply:
     text: str
     # Назви рукавичок для кнопок, у порядку карти; порожньо — без кнопок.
     keyboard: list[str]
-    # kind моделі, або ask_glove / not_found з пошуку, або unsure / busy / error.
+    # kind моделі, або ask_glove / not_found з пошуку, ask_question (саме місце без питання),
+    # або unsure / busy / error.
     kind: str
     # Назви файлів джерел, у порядку номерів.
     sources: list[str]
@@ -65,7 +67,12 @@ class AnswerService:
         """`notify` — як надіслати звірові проміжне повідомлення, поки бот чекає на Groq."""
         lock = self._chat_locks.setdefault(chat_id, asyncio.Lock())
         async with lock:
-            question = self.dialogue.merge(chat_id, message, self.search.state.resolver)
+            resolver = self.search.state.resolver
+            question = self.dialogue.merge(chat_id, message, resolver)
+            if question is None:
+                return Reply(
+                    ask_question_text(resolver.resolve(message)), [], "ask_question", [], None
+                )
             pack = self.search.search(question)
             context = [doc.filename for doc in pack.docs]
             if pack.mode == Mode.NOT_FOUND:
@@ -122,6 +129,15 @@ class AnswerService:
             raw=raw,
             retries=retries,
         )
+
+
+def ask_question_text(places: Places) -> str:
+    """Що відповісти на саме місце без питання: без LLM, тексти з брифу 03b."""
+    if len(places.gloves) == 1 and not places.parts:
+        return texts.ASK_QUESTION_GLOVE.format(glove=places.gloves[0])
+    if len(places.parts) == 1 and not places.gloves:
+        return texts.ASK_QUESTION_PART.format(part=texts.PART_ABOUT[places.parts[0]])
+    return texts.ASK_QUESTION_PLACES
 
 
 def parse_completion(completion: Completion, pack_size: int) -> _Parsed | None:

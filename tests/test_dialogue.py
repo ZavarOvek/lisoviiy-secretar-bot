@@ -87,10 +87,10 @@ def test_followup_within_ttl_is_merged(memory, clock, resolver):
     assert memory.merge(1, "У соснах", resolver) == "Коли збори мешканців? У соснах"
 
 
-def test_followup_after_ttl_is_a_new_question(memory, clock, resolver):
+def test_place_after_ttl_has_nothing_to_clarify(memory, clock, resolver):
     memory.merge(1, "Коли збори мешканців?", resolver)
     clock.now += 901
-    assert memory.merge(1, "У соснах", resolver) == "У соснах"
+    assert memory.merge(1, "У соснах", resolver) is None
 
 
 def test_followup_switches_the_place_instead_of_adding_it(memory, resolver, archive_search):
@@ -122,7 +122,7 @@ def test_new_full_question_replaces_the_base(memory, resolver):
 
 def test_chats_do_not_share_memory(memory, resolver):
     memory.merge(1, "Коли збори мешканців?", resolver)
-    assert memory.merge(2, "У соснах", resolver) == "У соснах"
+    assert memory.merge(2, "У соснах", resolver) is None
 
 
 def test_expired_chats_are_forgotten(memory, clock, resolver):
@@ -142,3 +142,12 @@ def test_every_glove_button_is_a_followup(glove, memory, resolver):
 
 def test_all_archive_gloves_are_followups(resolver):
     assert [g for g in resolver.gloves if not is_place_followup(g, resolver)] == []
+
+
+def test_place_without_a_question_does_not_become_the_base(memory, resolver):
+    # Порожня пам'ять — як після рестарту.
+    assert memory.merge(1, "Під дубом", resolver) is None
+    assert memory.merge(1, "У соснах", resolver) is None
+    assert memory._turns == {}
+    assert memory.merge(1, "Коли збори мешканців?", resolver) == "Коли збори мешканців?"
+    assert memory.merge(1, "Під дубом", resolver) == "Коли збори мешканців? Під дубом"

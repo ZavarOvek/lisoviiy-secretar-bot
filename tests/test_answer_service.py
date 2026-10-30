@@ -332,3 +332,58 @@ async def test_two_answers_never_call_the_model_in_parallel(search):
     assert [reply.kind for reply in replies] == ["answer", "answer"]
     assert len(fake.calls) == 2
     assert fake.max_active == 1
+
+
+# --- саме місце без питання (D2)
+
+
+@pytest.mark.parametrize(
+    ("message", "text"),
+    [
+        (
+            "Біля бобрової греблі",
+            "Що саме хочеш дізнатися про рукавичку «Біля бобрової греблі»? Напиши питання "
+            "повністю — наприклад, про гриби, стежки чи внески.",
+        ),
+        ("А в хвойному лісі?", "Що саме хочеш дізнатися про хвойний ліс? Напиши питання повністю."),
+        ("листяний ліс", "Що саме хочеш дізнатися про листяний ліс? Напиши питання повністю."),
+        (
+            "біля річки",
+            "Що саме хочеш дізнатися про тих, хто біля річки? Напиши питання повністю.",
+        ),
+        (
+            "Під дубом і під ялиною",
+            "Що саме хочеш дізнатися? Напиши питання повністю й назви місце.",
+        ),
+        (
+            "Під вербою біля річки",
+            "Що саме хочеш дізнатися? Напиши питання повністю й назви місце.",
+        ),
+    ],
+    ids=["glove", "khvoinyi", "lystianyi", "richka", "two-gloves", "glove-and-part"],
+)
+async def test_place_without_a_question_asks_for_it_without_the_model(message, text, search):
+    llm = FakeLLM()
+    reply = await service(search, llm).answer(1, message)
+    llm.assert_not_called()
+    assert (reply.text, reply.kind, reply.keyboard, reply.sources) == (text, "ask_question", [], [])
+
+
+async def test_place_after_ttl_asks_for_the_question(search):
+    llm = FakeLLM()
+    answers = service(search, llm)
+    answers.dialogue.ttl = -1  # будь-яка збережена репліка вже протухла
+    await answers.answer(1, "Коли збори мешканців?")
+    reply = await answers.answer(1, "У соснах")
+    llm.assert_not_called()
+    assert reply.kind == "ask_question"
+    assert "рукавичку «У соснах»" in reply.text
+
+
+async def test_place_only_message_is_not_kept_as_the_base(search):
+    llm = FakeLLM(reply_json())
+    answers = service(search, llm)
+    await answers.answer(1, "Під дубом")
+    await answers.answer(1, "Коли збори мешканців?")
+    await answers.answer(1, "Під дубом")
+    assert llm.question() == "Коли збори мешканців? Під дубом"
