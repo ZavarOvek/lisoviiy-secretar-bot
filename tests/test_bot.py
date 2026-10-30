@@ -64,10 +64,10 @@ class RecordingSession(BaseSession):
 
 
 class FakeAnswers:
-    def __init__(self, reply: Reply):
+    def __init__(self, reply: Reply, gloves: list[str] = GLOVES):
         self.reply = reply
         self.calls: list[tuple[int, str]] = []
-        resolver = SimpleNamespace(gloves=GLOVES)
+        resolver = SimpleNamespace(gloves=gloves)
         self.search = SimpleNamespace(state=SimpleNamespace(resolver=resolver))
 
     async def answer(self, chat_id, message, notify=None):
@@ -175,6 +175,18 @@ async def test_place_button_is_a_followup(data, bot, session):
     assert len(session.sent(AnswerCallbackQuery)) == 1
     assert answers.calls == [(42, "У соснах")]
     assert session.sent(SendMessage)[-1].text == _reply().text
+
+
+async def test_index_button_of_a_too_long_name_round_trips(bot, session):
+    long_name = "Біля найстарішого дуба на південному схилі"
+    gloves = ["Під дубом", long_name]
+    keyboard = place_keyboard(gloves)
+    [button] = [b for row in keyboard.inline_keyboard for b in row if b.text == long_name]
+    assert button.callback_data == "place:1"
+
+    answers = FakeAnswers(_reply(), gloves=gloves)
+    await _feed(bot, _callback(button.callback_data), answers)
+    assert answers.calls == [(42, long_name)]
 
 
 async def test_button_for_a_vanished_glove_is_ignored(bot, session):
