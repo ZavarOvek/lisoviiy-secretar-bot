@@ -44,6 +44,7 @@ class Bm25Index:
     _lengths: tuple[int, ...]
     _avg_length: float
     _idf: dict[str, float]
+    _df: dict[str, int]
 
     @classmethod
     def build(cls, documents: Iterable[SearchDocument]) -> "Bm25Index":
@@ -59,7 +60,7 @@ class Bm25Index:
             lemma: math.log(1 + (n - count + 0.5) / (count + 0.5)) for lemma, count in df.items()
         }
         avg_length = sum(lengths) / n if n else 0.0
-        return cls(docs, bags, lengths, avg_length, idf)
+        return cls(docs, bags, lengths, avg_length, idf, dict(df))
 
     def __len__(self) -> int:
         return len(self.documents)
@@ -67,6 +68,10 @@ class Bm25Index:
     @property
     def vocabulary(self) -> frozenset[str]:
         return frozenset(self._idf)
+
+    def document_frequency(self, lemma: str) -> int:
+        """У скількох документах індексу є лема."""
+        return self._df.get(lemma, 0)
 
     def score_all(self, query: Counter[str]) -> list[Scored]:
         """Рахунок кожного документа індексу; вага леми в питанні множить її внесок."""
