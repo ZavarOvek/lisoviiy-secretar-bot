@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -15,6 +16,14 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     groq_api_key: str = ""
     groq_model: str = "openai/gpt-oss-120b"
+    # Reasoning-токени теж рахуються в ліміт токенів на хвилину.
+    groq_reasoning_effort: Literal["low", "medium", "high"] = "low"
+    # Друга модель на 429; порожньо — чекати й повторювати основною.
+    groq_fallback_model: str = ""
+    # Разом із reasoning.
+    groq_max_completion_tokens: int = Field(default=1024, gt=0)
+    # Скільки бот пам'ятає попереднє питання звіра для уточнень місця.
+    dialogue_ttl_seconds: int = Field(default=900, gt=0)
 
     postgres_user: str = ""
     postgres_password: str = ""
