@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from lisovyi.domain import GENERAL_SCOPE, PART_NAMES, DocumentKind
+from lisovyi.domain import GENERAL_SCOPE, PART_NAMES, DocumentKind, ForestPart
 
 PLACE_PREFIX = "place:"
 HASH_CHARS = 10
@@ -46,6 +46,22 @@ def all_places(gloves: Sequence[str]) -> list[Place]:
         for part, name in PART_NAMES.items()
     ]
     return [*glove_places(gloves), *parts, Place(WHOLE_FOREST, DocumentKind.GENERAL, GENERAL_SCOPE)]
+
+
+_PART_FOR_WHOM = {
+    ForestPart.KHVOINYI: "хвойного лісу",
+    ForestPart.LYSTIANYI: "листяного лісу",
+    ForestPart.RICHKA: "тих, хто біля річки",
+}
+
+
+def human_place(kind: DocumentKind, scope: str) -> str:
+    """Місце людською мовою після «для»: рукавички «…», хвойного лісу, усього лісу."""
+    if kind == DocumentKind.GLOVE:
+        return f"рукавички «{scope}»"
+    if kind == DocumentKind.PART:
+        return _PART_FOR_WHOM[ForestPart(scope)]
+    return "усього лісу"
 
 
 def find_place(key: str, places: Sequence[Place]) -> Place | None:

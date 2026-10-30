@@ -1,21 +1,22 @@
 """Хендлери через справжній Dispatcher; запити до Telegram перехоплює RecordingSession."""
 
-from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Any
 
 import pytest
-from aiogram import Bot, Dispatcher
-from aiogram.client.session.base import BaseSession
-from aiogram.methods import AnswerCallbackQuery, SendChatAction, SendMessage, TelegramMethod
-from aiogram.types import CallbackQuery, Chat, Message, Update, User
+from aiogram import Bot
+from aiogram.methods import AnswerCallbackQuery, SendChatAction, SendMessage
+from aiogram.types import Update
+from telegram_fakes import (
+    DISPATCHER,
+    NoUploads,
+    RecordingSession,
+    callback_update,
+    message_update,
+)
 
 from lisovyi.answer.service import AnswerService, Reply
 from lisovyi.bot import texts as bot_texts
-from lisovyi.bot.handlers import (
-    router,
-    start_text,
-)
+from lisovyi.bot.handlers import start_text
 from lisovyi.bot.places import (
     PLACE_PREFIX,
     all_places,
@@ -29,9 +30,6 @@ from lisovyi.search.service import SearchService
 
 GLOVES = ["Біля бобрової греблі", "Біля мурашника", "На узліссі", "Під вербою", "Під дубом",
           "Під ялиною", "У ліщині", "У соснах"]  # fmt: skip
-CHAT = Chat(id=42, type="private")
-USER = User(id=42, is_bot=False, first_name="Їжак")
-
 START_TEXT = """\
 Привіт! Я Лісовий секретар 🌲
 
@@ -42,32 +40,6 @@ START_TEXT = """\
 — Коли утеплювати рукавичку під вербою?
 
 Маєш корисну пораду? Надішли її файлом: PDF, Word (.docx) або TXT."""  # noqa: E501
-
-
-class RecordingSession(BaseSession):
-    def __init__(self):
-        super().__init__()
-        self.requests: list[TelegramMethod[Any]] = []
-
-    async def make_request(self, bot, method, timeout=None):
-        self.requests.append(method)
-        if isinstance(method, SendMessage):
-            return Message(
-                message_id=len(self.requests),
-                date=datetime.now(UTC),
-                chat=Chat(id=method.chat_id, type="private"),
-                text=method.text,
-            )
-        return True
-
-    async def close(self):
-        pass
-
-    async def stream_content(self, *args, **kwargs):
-        raise NotImplementedError
-
-    def sent(self, kind: type) -> list[Any]:
-        return [request for request in self.requests if isinstance(request, kind)]
 
 
 class FakeAnswers:
@@ -97,28 +69,18 @@ def _reply(keyboard: list[str] | None = None) -> Reply:
     return Reply("Маслюки.\n\nДжерела:\n— Грибний путівник", keyboard or [], "answer", [], None)
 
 
-# Роутер модульний і приєднується до диспетчера лише раз.
-DISPATCHER = Dispatcher()
-DISPATCHER.include_router(router)
-
-
 async def _feed(bot: Bot, update: Update, answers: FakeAnswers) -> None:
-    await DISPATCHER.feed_update(bot, update, answers=answers, search=answers.search)
+    await DISPATCHER.feed_update(
+        bot, update, answers=answers, search=answers.search, uploads=NoUploads()
+    )
 
 
 def _message(text: str) -> Update:
-    return Update(
-        update_id=1,
-        message=Message(message_id=1, date=datetime.now(UTC), chat=CHAT, from_user=USER, text=text),
-    )
+    return message_update(text)
 
 
 def _callback(data: str) -> Update:
-    message = Message(message_id=7, date=datetime.now(UTC), chat=CHAT, text="Про яку?")
-    callback = CallbackQuery(
-        id="cb1", from_user=USER, chat_instance="ci", message=message, data=data
-    )
-    return Update(update_id=2, callback_query=callback)
+    return callback_update(data)
 
 
 # --- тексти
@@ -250,7 +212,11 @@ async def test_old_glove_button_after_restart_asks_for_the_question(bot, session
     # Свіжий сервіс — порожня пам'ять, як після рестарту; кнопка лишилась в історії чату.
     answers = AnswerService(search, NoLLM(), dialogue_ttl=900)
     await DISPATCHER.feed_update(
-        bot, _callback(PLACE_PREFIX + place_hash("Під дубом")), answers=answers, search=search
+        bot,
+        _callback(PLACE_PREFIX + place_hash("Під дубом")),
+        answers=answers,
+        search=search,
+        uploads=NoUploads(),
     )
     assert session.sent(SendMessage)[-1].text.startswith(
         "Що саме хочеш дізнатися про рукавичку «Під дубом»?"

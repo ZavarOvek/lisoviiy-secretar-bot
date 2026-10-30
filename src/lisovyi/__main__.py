@@ -9,10 +9,12 @@ from groq import AsyncGroq
 from lisovyi.answer.llm import LLMClient
 from lisovyi.answer.service import AnswerService
 from lisovyi.bot.handlers import COMMANDS, router
+from lisovyi.bot.uploads import UploadDialogue, uploads_router
 from lisovyi.config import Settings
 from lisovyi.db.session import make_engine, make_sessionmaker, run_migrations
 from lisovyi.ingest.importer import import_archive
 from lisovyi.search.service import SearchService
+from lisovyi.uploads.service import UploadService
 
 log = logging.getLogger("lisovyi")
 
@@ -69,11 +71,12 @@ async def run(settings: Settings, db_url: str) -> None:
         bot = Bot(settings.telegram_bot_token)
         await bot.set_my_commands(COMMANDS)
         log.info("bot commands: %s", ", ".join(command.command for command in COMMANDS))
+        uploads = UploadDialogue(UploadService(sessionmaker, search))
         dispatcher = Dispatcher()
+        # Завантаження першими: поки бот чекає ім'я звіра, текст — це ім'я, а не питання.
+        dispatcher.include_router(uploads_router)
         dispatcher.include_router(router)
-        await dispatcher.start_polling(
-            bot, sessionmaker=sessionmaker, search=search, answers=answers
-        )
+        await dispatcher.start_polling(bot, search=search, answers=answers, uploads=uploads)
     finally:
         await engine.dispose()
 
