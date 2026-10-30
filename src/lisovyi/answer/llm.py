@@ -20,6 +20,8 @@ TEMPERATURE = 0.2
 DEFAULT_RETRY_AFTER = 20.0
 # Довше звір чекати не має: тоді одразу «забагато питань».
 MAX_WAIT = 30.0
+# Groq округлює retry-after униз: після рівно 26 с з 26 повтор отримав 429 з retry-after 1 с.
+RETRY_MARGIN = 1.0
 
 Notify = Callable[[str], Awaitable[None]]
 
@@ -140,7 +142,7 @@ class LLMClient:
             raise LLMBusy
         if notify is not None:
             await _notify_quietly(notify, texts.WAIT)
-        await self._sleep(retry_after)
+        await self._sleep(retry_after + RETRY_MARGIN)
         # Чекали рівно стільки, скільки просив Groq.
         self._not_before.pop(self.model, None)
         return await self._call_or_busy(self.model, messages)

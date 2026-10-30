@@ -10,6 +10,7 @@ from groq_fakes import FakeGroq, completion, connection_error, rate_limited, sta
 from lisovyi.answer import texts
 from lisovyi.answer.llm import (
     DEFAULT_RETRY_AFTER,
+    RETRY_MARGIN,
     LLMBroken,
     LLMBusy,
     LLMClient,
@@ -129,7 +130,7 @@ async def test_429_without_fallback_waits_and_repeats_once():
     assert fake.models == ["main-model", "main-model"]
     assert result.content == OK.choices[0].message.content
     notify.assert_awaited_once_with(texts.WAIT)
-    sleep.assert_awaited_once_with(5.0)
+    sleep.assert_awaited_once_with(5.0 + RETRY_MARGIN)
 
 
 async def test_429_with_long_retry_after_is_busy_at_once():
@@ -152,7 +153,7 @@ async def test_429_on_the_repeat_is_busy():
     with pytest.raises(LLMBusy):
         await llm.complete(MESSAGES, AsyncMock())
     assert len(fake.calls) == 2
-    sleep.assert_awaited_once_with(5.0)
+    sleep.assert_awaited_once_with(5.0 + RETRY_MARGIN)
 
 
 async def test_429_from_the_fallback_model_is_busy():
@@ -168,7 +169,7 @@ async def test_429_without_retry_after_waits_the_default():
     fake = FakeGroq(rate_limited(None), OK)
     llm, sleep = _client(fake)
     await llm.complete(MESSAGES)
-    sleep.assert_awaited_once_with(DEFAULT_RETRY_AFTER)
+    sleep.assert_awaited_once_with(DEFAULT_RETRY_AFTER + RETRY_MARGIN)
 
 
 async def test_failed_intermediate_message_does_not_stop_the_answer(caplog):
@@ -313,7 +314,7 @@ async def test_short_remaining_pause_is_waited_out_by_the_next_question():
     await llm.complete(MESSAGES, notify)
 
     notify.assert_awaited_once_with(texts.WAIT)
-    sleep.assert_awaited_once_with(10.0)
+    sleep.assert_awaited_once_with(10.0 + RETRY_MARGIN)
     assert len(fake.calls) == 2
 
 
