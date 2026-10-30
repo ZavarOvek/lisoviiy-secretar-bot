@@ -22,8 +22,9 @@ class Settings(BaseSettings):
     # reasoning_effort і strict json_schema, тож годиться лише модель, що їх підтримує
     # (openai/gpt-oss-20b). Інша на кожен 429 дасть 400 і «щось пішло не так».
     groq_fallback_model: str = ""
-    # Разом із reasoning.
-    groq_max_completion_tokens: int = Field(default=1024, gt=0)
+    # Разом із reasoning. Groq бронює в TPM prompt + це число ще до відповіді, тож зайве
+    # тут з'їдає ліміт; найдовший completion у gold-прогоні брифу 03 — 261 токен.
+    groq_max_completion_tokens: int = Field(default=512, gt=0)
     # Скільки бот пам'ятає попереднє питання звіра для уточнень місця.
     dialogue_ttl_seconds: int = Field(default=900, gt=0)
 

@@ -93,7 +93,7 @@ class LLMClient:
         *,
         fallback_model: str = "",
         reasoning_effort: str = "low",
-        max_completion_tokens: int = 1024,
+        max_completion_tokens: int = 512,
         max_wait: float = MAX_WAIT,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         clock: Callable[[], float] = time.monotonic,
