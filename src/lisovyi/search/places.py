@@ -29,8 +29,11 @@ class PlaceResolver:
         self._glove_keys = {glove: _glove_key(glove) for glove in forest_map}
         self._place_lemmas = frozenset().union(*self._glove_keys.values(), *PART_KEYS.values())
         # Усі слова назв місць: «бобрової» з «Біля бобрової греблі», «ліс» з «хвойний ліс».
+        # Ключі теж: «прибережжя» — ключ частини, хоч у назві «біля річки» його немає.
         names = [*forest_map, *PART_NAMES.values()]
-        self._name_lemmas = frozenset().union(*(token for name in names for token in tokens(name)))
+        self._name_lemmas = self._place_lemmas.union(
+            *(token for name in names for token in tokens(name))
+        )
 
     @property
     def gloves(self) -> list[str]:

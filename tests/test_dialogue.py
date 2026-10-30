@@ -64,6 +64,11 @@ def test_strip_places_keeps_other_words_intact(resolver):
         ("біля річки", True),
         ("А під вербою?", True),
         ("Під дубом", True),
+        ("Біля бобрової греблі", True),
+        ("А в листяному лісі?", True),
+        ("на прибережжі", True),
+        ("Бобрової", False),
+        ("Чи можна в лісі?", False),
         ("Які гриби біля дубів?", False),
         ("а де?", False),
         ("", False),
@@ -125,3 +130,15 @@ def test_expired_chats_are_forgotten(memory, clock, resolver):
     clock.now += 901
     memory.merge(2, "Які гриби біля сосон?", resolver)
     assert list(memory._turns) == [2]
+
+
+@pytest.mark.parametrize("glove", ["Біля бобрової греблі", "Біля мурашника", "На узліссі"])
+def test_every_glove_button_is_a_followup(glove, memory, resolver):
+    # Натиск кнопки — назва рукавички як є, зокрема з кількох змістовних слів.
+    assert resolver.gloves, "archive map is empty"
+    memory.merge(1, "Коли збори мешканців?", resolver)
+    assert memory.merge(1, glove, resolver) == f"Коли збори мешканців? {glove}"
+
+
+def test_all_archive_gloves_are_followups(resolver):
+    assert [g for g in resolver.gloves if not is_place_followup(g, resolver)] == []

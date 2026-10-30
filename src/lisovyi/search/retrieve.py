@@ -261,16 +261,20 @@ def merge_followup(previous: str | None, message: str, resolver: PlaceResolver) 
 
 
 def is_place_followup(message: str, resolver: PlaceResolver) -> bool:
-    """Чи всі змістовні слова повідомлення — назви місць («У соснах», «А під вербою?»).
+    """Чи повідомлення лише називає місце («У соснах», «А під вербою?», «Біля бобрової греблі»).
 
-    Прийменники не змістовні, навіть якщо мають інший розбір: «під» — ще й іменник.
+    Хоч одне слово має бути ключем місця, а решта змістовних — словами назв місць:
+    «бобрової» з «Біля бобрової греблі», «лісі» з «у листяному лісі». Прийменники не
+    змістовні, навіть якщо мають інший розбір: «під» — ще й іменник.
     """
     content = [
         token
         for match in words(message)
         if not is_preposition(match.group()) and (token := lemma_set(match.group()))
     ]
-    return bool(content) and all(resolver.is_place_token(token) for token in content)
+    return any(resolver.is_place_token(token) for token in content) and all(
+        resolver.is_place_name_token(token) for token in content
+    )
 
 
 def strip_places(text: str, resolver: PlaceResolver) -> str:
