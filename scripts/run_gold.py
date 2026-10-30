@@ -63,8 +63,10 @@ async def ask(answers: AnswerService, chat_id: int, turns: list[str]) -> Reply:
 def record(question: dict[str, Any], reply: Reply, settings: Settings) -> dict[str, Any]:
     return {
         "id": question["id"],
-        "model": settings.groq_model,
+        # Модель, що справді відповіла (з останньої спроби); без виклику LLM — налаштована.
+        "model": reply.attempts[-1].model if reply.attempts else settings.groq_model,
         "fallback_model": settings.groq_fallback_model or None,
+        "attempts": [asdict(attempt) for attempt in reply.attempts],
         "question": question["turns"][-1],
         "turns": question["turns"],
         "behavior": question["behavior"],
@@ -105,6 +107,13 @@ def summarize(rows: list[dict[str, Any]], gold: dict[str, dict[str, Any]]) -> No
     print()
     print(f"kind matches: {kind_ok}/{len(rows)}")
     print(f"evidence fully among sources: {evidence_ok}/{len(rows)}")
+    attempts = [attempt for row in rows for attempt in row["attempts"]]
+    completions = [a["completion_tokens"] for a in attempts if a["completion_tokens"] is not None]
+    truncated = sum(a["finish_reason"] == "length" for a in attempts)
+    print(
+        f"model calls: {len(attempts)}, finish_reason=length: {truncated}, "
+        f"max completion_tokens per call: {max(completions, default=0)}"
+    )
     print("tokens: " + " ".join(f"{key.removesuffix('_tokens')}={n}" for key, n in totals.items()))
 
 

@@ -10,7 +10,7 @@ from groq_fakes import FakeGroq, completion
 from lisovyi.answer import texts
 from lisovyi.answer.llm import Completion, LLMBroken, LLMBusy, LLMClient, OutputRejected, Usage
 from lisovyi.answer.service import MAX_MESSAGE_CHARS, AnswerService, clean_text, truncate
-from lisovyi.domain import DocumentKind
+from lisovyi.domain import DocumentKind, ForestPart
 from lisovyi.search import service as search_module
 from lisovyi.search.index import Bm25Index, SearchDocument
 from lisovyi.search.places import PlaceResolver
@@ -357,10 +357,23 @@ async def test_two_answers_never_call_the_model_in_parallel(search):
         ),
         (
             "Під вербою біля річки",
+            "Що саме хочеш дізнатися про рукавичку «Під вербою»? Напиши питання "
+            "повністю — наприклад, про гриби, стежки чи внески.",
+        ),
+        (
+            "Під дубом біля річки",
             "Що саме хочеш дізнатися? Напиши питання повністю й назви місце.",
         ),
     ],
-    ids=["glove", "khvoinyi", "lystianyi", "richka", "two-gloves", "glove-and-part"],
+    ids=[
+        "glove",
+        "khvoinyi",
+        "lystianyi",
+        "richka",
+        "two-gloves",
+        "glove-and-its-part",
+        "glove-and-foreign-part",
+    ],
 )
 async def test_place_without_a_question_asks_for_it_without_the_model(message, text, search):
     llm = FakeLLM()
@@ -383,7 +396,27 @@ async def test_place_after_ttl_asks_for_the_question(search):
 async def test_place_only_message_is_not_kept_as_the_base(search):
     llm = FakeLLM(reply_json())
     answers = service(search, llm)
-    await answers.answer(1, "Під дубом")
+    # Якби перше місце стало базою, друге склеїлося б з ним і пішло б у пошук.
+    first = await answers.answer(1, "Під дубом")
+    second = await answers.answer(1, "У соснах")
+    assert (first.kind, second.kind) == ("ask_question", "ask_question")
+    llm.assert_not_called()
     await answers.answer(1, "Коли збори мешканців?")
     await answers.answer(1, "Під дубом")
     assert llm.question() == "Коли збори мешканців? Під дубом"
+
+
+def test_every_forest_part_has_an_ask_question_name():
+    assert set(texts.PART_ABOUT) == set(ForestPart)
+
+
+async def test_attempts_record_the_answering_model_and_finish_reason(search):
+    llm = FakeLLM(
+        raw_completion('{"kind": "answer", "text": "Утепл', finish_reason="length"),
+        reply_json(sources=[1]),
+    )
+    reply = await service(search, llm).answer(1, "Які гриби біля сосон?")
+    assert [(a.model, a.finish_reason, a.completion_tokens) for a in reply.attempts] == [
+        ("main-model", "length", 100),
+        ("main-model", "stop", 100),
+    ]

@@ -74,6 +74,10 @@ class LLMBroken(LLMError):
 class OutputRejected(Exception):
     """Groq відкинув згенерований JSON (400 json_validate_failed): як невалідний JSON."""
 
+    def __init__(self, model: str = ""):
+        super().__init__(model)
+        self.model = model
+
 
 class _RateLimited(Exception):
     def __init__(self, retry_after: float):
@@ -178,7 +182,7 @@ class LLMClient:
         except groq.BadRequestError as error:
             if _error_code(error) == "json_validate_failed":
                 log.warning("groq rejected the generated JSON: model=%s", model)
-                raise OutputRejected from error
+                raise OutputRejected(model) from error
             _log_failure(model, error)
             raise LLMBroken from error
         except groq.APIError as error:

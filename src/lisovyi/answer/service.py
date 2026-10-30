@@ -12,7 +12,7 @@ from lisovyi.answer import texts
 from lisovyi.answer.dialogue import DialogueMemory
 from lisovyi.answer.llm import Completion, LLMClient, LLMError, Notify, OutputRejected, Usage
 from lisovyi.answer.prompt import KINDS, build_messages
-from lisovyi.search.places import Places
+from lisovyi.search.places import PlaceResolver, Places
 from lisovyi.search.retrieve import ContextDoc, ContextPack, Mode, display_date
 from lisovyi.search.service import SearchService
 
@@ -44,6 +44,16 @@ class Reply:
     context: list[str] = field(default_factory=list)
     raw: list[str] = field(default_factory=list)
     retries: int = 0
+    # Кожен виклик моделі: хто відповів і чи не обрізано відповідь лімітом токенів.
+    attempts: list["Attempt"] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class Attempt:
+    model: str
+    # stop / length / …; "rejected" — Groq відкинув JSON поза схемою (400).
+    finish_reason: str
+    completion_tokens: int | None
 
 
 @dataclass(frozen=True)
@@ -70,9 +80,8 @@ class AnswerService:
             resolver = self.search.state.resolver
             question = self.dialogue.merge(chat_id, message, resolver)
             if question is None:
-                return Reply(
-                    ask_question_text(resolver.resolve(message)), [], "ask_question", [], None
-                )
+                text = ask_question_text(resolver.resolve(message), resolver)
+                return Reply(text, [], "ask_question", [], None)
             pack = self.search.search(question)
             context = [doc.filename for doc in pack.docs]
             if pack.mode == Mode.NOT_FOUND:
@@ -87,27 +96,46 @@ class AnswerService:
         context = [doc.filename for doc in pack.docs]
         usage: Usage | None = None
         raw: list[str] = []
+        attempts: list[Attempt] = []
         notify = _once(notify) if notify is not None else None
         for attempt in range(ATTEMPTS):
             try:
                 completion = await self.llm.complete(messages, notify)
             except LLMError as error:
                 kind = "busy" if error.reply == texts.BUSY else "error"
-                return Reply(error.reply, [], kind, [], usage, pack.mode, context, raw, attempt)
-            except OutputRejected:
+                return Reply(
+                    error.reply, [], kind, [], usage, pack.mode, context, raw, attempt, attempts
+                )
+            except OutputRejected as rejected:
                 raw.append("")
+                attempts.append(Attempt(rejected.model, "rejected", None))
                 continue
             raw.append(completion.content)
+            attempts.append(
+                Attempt(
+                    completion.model,
+                    completion.finish_reason,
+                    completion.usage.completion_tokens if completion.usage else None,
+                )
+            )
             usage = _add(usage, completion.usage)
             parsed = parse_completion(completion, len(pack.docs))
             _log_call(question, completion, parsed)
             if parsed is not None:
-                return self._reply(parsed, pack, usage, raw, attempt)
+                return self._reply(parsed, pack, usage, raw, attempt, attempts)
         log.warning("no usable answer: question=%r raw=%r", question, raw[-1])
-        return Reply(texts.UNSURE, [], "unsure", [], usage, pack.mode, context, raw, ATTEMPTS - 1)
+        return Reply(
+            texts.UNSURE, [], "unsure", [], usage, pack.mode, context, raw, ATTEMPTS - 1, attempts
+        )
 
     def _reply(
-        self, parsed: _Parsed, pack: ContextPack, usage: Usage | None, raw: list[str], retries: int
+        self,
+        parsed: _Parsed,
+        pack: ContextPack,
+        usage: Usage | None,
+        raw: list[str],
+        retries: int,
+        attempts: list[Attempt],
     ) -> Reply:
         docs = [pack.docs[number - 1] for number in parsed.sources]
         if parsed.kind == "not_found":
@@ -128,12 +156,17 @@ class AnswerService:
             context=[doc.filename for doc in pack.docs],
             raw=raw,
             retries=retries,
+            attempts=attempts,
         )
 
 
-def ask_question_text(places: Places) -> str:
-    """Що відповісти на саме місце без питання: без LLM, тексти з брифу 03b."""
-    if len(places.gloves) == 1 and not places.parts:
+def ask_question_text(places: Places, resolver: PlaceResolver) -> str:
+    """Що відповісти на саме місце без питання: без LLM, тексти з брифу 03b.
+
+    Рукавичка разом із власною частиною лісу («Під вербою біля річки») — це одна рукавичка:
+    пошук теж зводить таке місце до неї.
+    """
+    if len(places.gloves) == 1 and set(places.parts) <= set(resolver.parts_of(places.gloves[0])):
         return texts.ASK_QUESTION_GLOVE.format(glove=places.gloves[0])
     if len(places.parts) == 1 and not places.gloves:
         return texts.ASK_QUESTION_PART.format(part=texts.PART_ABOUT[places.parts[0]])
