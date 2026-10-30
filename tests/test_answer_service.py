@@ -279,6 +279,14 @@ async def test_intermediate_message_is_sent_once_per_question(search):
     assert reply.kind == "answer"
 
 
+async def test_multi_word_glove_button_answers_the_saved_question(search):
+    llm = FakeLLM(reply_json(sources=[1]))
+    answers = service(search, llm)
+    await answers.answer(1, "Коли збори мешканців?")
+    await answers.answer(1, "Біля бобрової греблі")
+    assert llm.question() == "Коли збори мешканців? Біля бобрової греблі"
+
+
 # --- пам'ять і черги
 
 
