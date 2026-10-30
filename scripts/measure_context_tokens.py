@@ -8,6 +8,7 @@
 """
 
 import json
+import math
 import sys
 import time
 import urllib.error
@@ -21,6 +22,8 @@ URL = "https://api.groq.com/openai/v1/chat/completions"
 CASES = PROJECT_ROOT / "tests" / "fixtures" / "retrieval_cases.json"
 LARGEST = 3
 PAUSE_SECONDS = 10
+# Якщо Groq не прислав Retry-After: ліміт рахується за хвилину.
+RETRY_SECONDS = 60
 
 
 def largest_packs(char_budget: int) -> list[tuple[str, str]]:
@@ -60,6 +63,24 @@ def prompt_tokens(api_key: str, model: str, content: str) -> dict:
         return json.load(response)["usage"]
 
 
+def measure(api_key: str, model: str, case_id: str, content: str) -> dict:
+    """Один запит; на 429 (ліміт токенів за хвилину) — одна повторна спроба після паузи."""
+    for attempt in (1, 2):
+        try:
+            return prompt_tokens(api_key, model, content)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 429 and attempt == 1:
+                wait = math.ceil(float(exc.headers.get("Retry-After") or RETRY_SECONDS))
+                print(f"{case_id}: rate limited, retrying in {wait} s", file=sys.stderr)
+                time.sleep(wait)
+                continue
+            # Тіло відповіді Groq містить опис помилки, а не ключ.
+            sys.exit(f"{case_id}: HTTP {exc.code}: {exc.read().decode(errors='replace')[:500]}")
+        except urllib.error.URLError as exc:
+            sys.exit(f"{case_id}: cannot reach Groq: {exc.reason}")
+    raise AssertionError("unreachable")
+
+
 def main() -> None:
     settings = Settings()
     if not settings.groq_api_key:
@@ -71,11 +92,7 @@ def main() -> None:
     for i, (case_id, content) in enumerate(packs):
         if i:
             time.sleep(PAUSE_SECONDS)
-        try:
-            usage = prompt_tokens(settings.groq_api_key, settings.groq_model, content)
-        except urllib.error.HTTPError as exc:
-            # Тіло відповіді Groq містить опис помилки, а не ключ.
-            sys.exit(f"{case_id}: HTTP {exc.code}: {exc.read().decode(errors='replace')[:500]}")
+        usage = measure(settings.groq_api_key, settings.groq_model, case_id, content)
         tokens = usage["prompt_tokens"]
         print(f"{case_id:<6} {len(content):>6} {tokens:>14} {len(content) / tokens:>12.2f}")
 
