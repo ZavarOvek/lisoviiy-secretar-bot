@@ -1,12 +1,14 @@
+import threading
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import event, select, update
 
 from lisovyi.config import PROJECT_ROOT
 from lisovyi.db.models import Beast, Document, ForestMapEntry
 from lisovyi.domain import DocumentKind, DocumentStatus, TextSource
 from lisovyi.ingest.importer import import_archive
+from lisovyi.search import service as service_module
 from lisovyi.search.service import SearchService
 
 pytestmark = pytest.mark.db
@@ -109,6 +111,41 @@ async def test_followup_is_merged_with_the_previous_question(sessionmaker):
     service = await _reloaded(sessionmaker)
     pack = service.search("У соснах", previous="Коли збори мешканців?")
     assert (pack.mode, pack.gloves) == ("placed", ["У соснах"])
+
+
+async def test_reload_reads_one_repeatable_read_snapshot(sessionmaker):
+    await _imported(sessionmaker)
+    engine = sessionmaker.kw["bind"].sync_engine
+    levels = []
+
+    def record(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT"):
+            levels.append(conn.get_isolation_level())
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        await _reloaded(sessionmaker)
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+
+    # Документи й карта — два SELECT в одній транзакції REPEATABLE READ.
+    assert levels == ["REPEATABLE READ", "REPEATABLE READ"]
+
+
+async def test_index_is_built_off_the_event_loop_thread(sessionmaker, monkeypatch):
+    await _imported(sessionmaker)
+    threads = []
+    build = service_module._build_state
+
+    def spy(*args):
+        threads.append(threading.current_thread())
+        return build(*args)
+
+    monkeypatch.setattr(service_module, "_build_state", spy)
+    service = await _reloaded(sessionmaker)
+
+    assert threads and threads[0] is not threading.main_thread()
+    assert len(service.state.index) == 77
 
 
 def test_search_before_reload_is_an_error():

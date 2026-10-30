@@ -32,7 +32,7 @@ def test_adjective_is_not_its_noun():
     assert "дуб" not in lemma_set("дубове")
 
 
-@pytest.mark.parametrize("word", ["біля", "в", "із", "ми", "він", "коли", "це", "треба"])
+@pytest.mark.parametrize("word", ["біля", "в", "із", "ми", "він", "коли", "це", "треба", "можна"])
 def test_function_and_stop_words_are_dropped(word):
     assert lemma_set(word) == frozenset()
 
