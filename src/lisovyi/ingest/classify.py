@@ -111,12 +111,100 @@ def _scopes_from_title(title: str) -> set[str]:
     return {part.value for part, marker in SCOPE_PART_MARKERS.items() if marker.search(title)}
 
 
+# Звертання, після якого рукавичка в лапках — адресат поради (правило 3 для завантажень).
+QUOTED_GLOVE_MARKER = re.compile(
+    r"\bдля\b|\bстосу\w*|\bзвернення\b|\bмешкан\w*|\bувага\b|\bшановні\b|\bлюбі\b"
+    r"|\bдорогі\b|\bдо\s+відома\b|\bу\s+рукавичці\b",
+    re.IGNORECASE,
+)
+# Тема, якщо з назви файлу не вийшло жодної латинської літери чи цифри.
+FALLBACK_TOPIC = "porada"
+
+
+@dataclass(frozen=True)
+class UploadClassification:
+    kind: DocumentKind
+    scope: str
+    topic: str
+    # Тема з таблиць (тип документа рукавички, ключове слово назви), а не з транслітерації:
+    # лише така тема може точно збігтися з темою наявного документа.
+    topic_from_rules: bool
+
+
+def classify_upload(title: str, text: str, gloves: Collection[str]) -> UploadClassification | None:
+    """Місце поради, яку надіслав звір. None — правила не впоралися, питаємо звіра.
+
+    Правила по черзі, перше спрацювання перемагає: «Карта лісу» → назва архівного вигляду →
+    рукавичка в лапках у вступі → частина лісу чи весь ліс у вступі → маркери частини в назві.
+    Архівний імпорт цим не користується: він і далі йде через `classify`.
+    """
+    title = unicodedata.normalize("NFC", title)
+    text = unicodedata.normalize("NFC", text)
+    gloves = [unicodedata.normalize("NFC", glove) for glove in gloves]
+    if title == MAP_TITLE:
+        return UploadClassification(DocumentKind.MAP, GENERAL_SCOPE, MAP_TOPIC, True)
+    for prefix, topic in GLOVE_DOCUMENT_TOPICS.items():
+        rest = title.removeprefix(prefix + " ")
+        if rest != title and rest in gloves:
+            return UploadClassification(DocumentKind.GLOVE, rest, topic, True)
+
+    topic, from_rules = upload_topic(title)
+    glove = glove_from_intro(text, gloves)
+    if glove is not None:
+        return UploadClassification(DocumentKind.GLOVE, glove, topic, from_rules)
+    scopes = _scopes_from_text(text)
+    if scopes is None:
+        scopes = _scopes_from_title(title)
+    if len(scopes) != 1:
+        return None
+    scope = scopes.pop()
+    kind = DocumentKind.GENERAL if scope == GENERAL_SCOPE else DocumentKind.PART
+    return UploadClassification(kind, scope, topic, from_rules)
+
+
+def glove_from_intro(text: str, gloves: Collection[str]) -> str | None:
+    """Рукавичка в лапках у першому реченні вступу, яке звертається до когось.
+
+    Речення, де звертання є, а рукавичок у лапках дві чи більше, правило не застосовує:
+    вгадувати, котра з них адресат, не беремося.
+    """
+    for sentence in _intro_sentences(text):
+        if not QUOTED_GLOVE_MARKER.search(sentence):
+            continue
+        named = {glove for glove in gloves if f"«{glove}»" in sentence}
+        if named:
+            return named.pop() if len(named) == 1 else None
+    return None
+
+
+def _intro_sentences(text: str) -> list[str]:
+    """Перші речення після заголовка. Порада з одного рядка заголовка не має.
+
+    Пробіли й переноси згорнуті: PDF буває розриває назву в лапках («Під\n ялиною»).
+    """
+    head, newline, body = text.strip().partition("\n")
+    flat = " ".join((body if newline else head).split())
+    return [s for s in re.split(r"(?<=[.!?])\s+", flat) if s][:SENTENCES_TO_CHECK]
+
+
+def upload_topic(title: str) -> tuple[str, bool]:
+    """Тема поради з назви файлу і чи вона з таблиці ключових слів."""
+    topic = _keyword_topic(title)
+    if topic is not None:
+        return topic, True
+    return slugify(title) or FALLBACK_TOPIC, False
+
+
 def topic_for(title: str) -> str:
+    return _keyword_topic(title) or slugify(title)
+
+
+def _keyword_topic(title: str) -> str | None:
     lowered = title.lower()
     for pattern, topic in TOPIC_KEYWORDS:
         if pattern.search(lowered):
             return topic
-    return slugify(title)
+    return None
 
 
 # Транслітерація за постановою КМУ № 55 (2010); на початку слова є/ї/й/ю/я передаються інакше.
