@@ -53,9 +53,8 @@ async def test_retrieval_cases_through_the_database(sessionmaker):
         await import_archive(
             session, PROJECT_ROOT / "data" / "archive", PROJECT_ROOT / "data" / "transcripts"
         )
-    service = SearchService(DEFAULT_CHAR_BUDGET)
-    async with sessionmaker() as session:
-        await service.reload(session)
+    service = SearchService(sessionmaker, DEFAULT_CHAR_BUDGET)
+    await service.reload()
 
     failures = {}
     for case in CASES:

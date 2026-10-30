@@ -5,7 +5,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from lisovyi.db.models import Beast, Document, ForestMapEntry
 from lisovyi.domain import DocumentKind, DocumentStatus
@@ -22,19 +22,39 @@ class _State:
 
 
 class SearchService:
-    def __init__(self, char_budget: int = DEFAULT_CHAR_BUDGET):
+    def __init__(
+        self,
+        sessionmaker: async_sessionmaker[AsyncSession] | None,
+        char_budget: int = DEFAULT_CHAR_BUDGET,
+    ):
+        """`sessionmaker` None — лише для тестів, що підставляють готовий стан."""
+        self._sessionmaker = sessionmaker
         self.char_budget = char_budget
         self._state: _State | None = None
+        # Два reload поспіль (дві поради одна за одною) не мають перегнати один одного:
+        # інакше пізніший знімок міг би затерти ще пізніший.
+        self._reload_lock = asyncio.Lock()
 
-    async def reload(self, session: AsyncSession) -> None:
+    async def reload(self) -> None:
         """Перебудовує індекс і резолвер з активних документів і forest_map.
 
-        Документи й карта читаються в одній транзакції REPEATABLE READ, тож бачать один
-        знімок бази. Індекс будується в окремому потоці, щоб не тримати цикл подій бота.
-        Обидва підміняються одним присвоєнням: читач бачить або старий стан, або новий.
+        Читає у власній сесії, тож не залежить від транзакцій того, хто викликає. Документи
+        й карта читаються в одній транзакції REPEATABLE READ і бачать один знімок бази.
+        Індекс будується в окремому потоці, щоб не тримати цикл подій бота. Обидва
+        підміняються одним присвоєнням: читач бачить або старий стан, або новий.
         """
-        # Окрема транзакція, бо рівень ізоляції задається до першого запиту в ній.
-        async with session.begin():
+        if self._sessionmaker is None:
+            raise RuntimeError("SearchService has no sessionmaker: cannot reload")
+        async with self._reload_lock:
+            documents, forest_map = await self._read_snapshot()
+            if not forest_map:
+                raise RuntimeError("forest_map is empty: import the forest map before searching")
+            self._state = await asyncio.to_thread(_build_state, documents, forest_map)
+
+    async def _read_snapshot(self) -> tuple[list[SearchDocument], dict[str, list[str]]]:
+        assert self._sessionmaker is not None
+        # Рівень ізоляції задається на з'єднанні до першого запиту транзакції.
+        async with self._sessionmaker() as session, session.begin():
             await session.connection(execution_options={"isolation_level": "REPEATABLE READ"})
             rows = await session.execute(
                 select(Document, Beast.name)
@@ -61,9 +81,7 @@ class SearchService:
                 select(ForestMapEntry).order_by(ForestMapEntry.position, ForestMapEntry.glove)
             )
             forest_map = {entry.glove: list(entry.parts) for entry in entries}
-        if not forest_map:
-            raise RuntimeError("forest_map is empty: import the forest map before searching")
-        self._state = await asyncio.to_thread(_build_state, documents, forest_map)
+        return documents, forest_map
 
     @property
     def state(self) -> _State:

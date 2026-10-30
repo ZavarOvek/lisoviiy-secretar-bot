@@ -138,9 +138,8 @@ async def main(only: set[str] | None, model: str | None) -> None:
         async with sessionmaker() as session:
             stats = await import_archive(session, settings.archive_dir, settings.transcripts_dir)
         log.info("archive import: inserted=%d skipped=%d", stats.inserted, stats.skipped)
-        search = SearchService(settings.context_char_budget)
-        async with sessionmaker() as session:
-            await search.reload(session)
+        search = SearchService(sessionmaker, settings.context_char_budget)
+        await search.reload()
     finally:
         await engine.dispose()
 

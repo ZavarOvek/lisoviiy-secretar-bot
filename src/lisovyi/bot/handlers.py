@@ -1,21 +1,16 @@
 """Telegram: /start і /help, питання звичайним текстом, кнопки рукавичок."""
 
 import logging
-from collections.abc import Sequence
 
 from aiogram import Bot, F, Router
 from aiogram.enums import ChatAction
 from aiogram.filters import Command, CommandStart
-from aiogram.types import (
-    BotCommand,
-    CallbackQuery,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    Message,
-)
+from aiogram.types import BotCommand, CallbackQuery, Message
 from aiogram.utils.chat_action import ChatActionSender
 
 from lisovyi.answer.service import AnswerService
+from lisovyi.bot import texts
+from lisovyi.bot.places import PLACE_PREFIX, find_place, glove_places, place_keyboard
 from lisovyi.search.service import SearchService
 
 log = logging.getLogger(__name__)
@@ -27,10 +22,6 @@ COMMANDS = [
     BotCommand(command="help", description="Довідка"),
 ]
 
-PLACE_PREFIX = "place:"
-# Telegram обмежує callback_data 64 байтами UTF-8.
-CALLBACK_DATA_BYTES = 64
-BUTTONS_PER_ROW = 2
 TYPING_REPEAT = 5.0
 
 _NUMBER_WORDS = {8: "восьми"}
@@ -55,36 +46,6 @@ def start_text(gloves: int) -> str:
     )
 
 
-def place_keyboard(gloves: Sequence[str]) -> InlineKeyboardMarkup | None:
-    """Кнопка на кожну рукавичку. callback_data — назва, а якщо найдовша не влазить
-    у 64 байти, то для всіх кнопок індекс у карті."""
-    if not gloves:
-        return None
-    by_name = all(_fits(PLACE_PREFIX + glove) for glove in gloves)
-    buttons = [
-        InlineKeyboardButton(
-            text=glove, callback_data=PLACE_PREFIX + (glove if by_name else str(index))
-        )
-        for index, glove in enumerate(gloves)
-    ]
-    rows = [buttons[i : i + BUTTONS_PER_ROW] for i in range(0, len(buttons), BUTTONS_PER_ROW)]
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def glove_from_callback(data: str, gloves: Sequence[str]) -> str | None:
-    """Назва рукавички з callback_data; None, якщо її вже немає на карті."""
-    value = data.removeprefix(PLACE_PREFIX)
-    if value in gloves:
-        return value
-    if value.isdigit() and int(value) < len(gloves):
-        return gloves[int(value)]
-    return None
-
-
-def _fits(data: str) -> bool:
-    return len(data.encode("utf-8")) <= CALLBACK_DATA_BYTES
-
-
 @router.message(CommandStart())
 @router.message(Command("help"))
 async def start(message: Message, search: SearchService) -> None:
@@ -99,12 +60,17 @@ async def question(message: Message, bot: Bot, answers: AnswerService) -> None:
 @router.callback_query(F.data.startswith(PLACE_PREFIX))
 async def place_chosen(callback: CallbackQuery, bot: Bot, answers: AnswerService) -> None:
     await callback.answer()
-    glove = glove_from_callback(callback.data or "", answers.search.state.resolver.gloves)
-    if glove is None or callback.message is None:
+    if callback.message is None:
+        return
+    chat_id = callback.message.chat.id
+    key = (callback.data or "").removeprefix(PLACE_PREFIX)
+    place = find_place(key, glove_places(answers.search.state.resolver.gloves))
+    if place is None:
         log.warning("place button for a glove no longer on the map: %r", callback.data)
+        await bot.send_message(chat_id, texts.PLACE_GONE, parse_mode=None)
         return
     # Натиск кнопки — те саме, що звір написав назву рукавички.
-    await _answer(bot, callback.message.chat.id, glove, answers)
+    await _answer(bot, chat_id, place.label, answers)
 
 
 async def _answer(bot: Bot, chat_id: int, text: str, answers: AnswerService) -> None:
@@ -118,5 +84,8 @@ async def _answer(bot: Bot, chat_id: int, text: str, answers: AnswerService) -> 
         reply = await answers.answer(chat_id, text, notify)
     # Без parse_mode: текст моделі не екранується, тож розмітка в ньому була б небезпечна.
     await bot.send_message(
-        chat_id, reply.text, parse_mode=None, reply_markup=place_keyboard(reply.keyboard)
+        chat_id,
+        reply.text,
+        parse_mode=None,
+        reply_markup=place_keyboard(glove_places(reply.keyboard)),
     )

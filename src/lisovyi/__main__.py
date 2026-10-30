@@ -42,9 +42,8 @@ async def run(settings: Settings, db_url: str) -> None:
             stats.skipped,
         )
 
-        search = SearchService(settings.context_char_budget)
-        async with sessionmaker() as session:
-            await search.reload(session)
+        search = SearchService(sessionmaker, settings.context_char_budget)
+        await search.reload()
         log.info(
             "search index: %d documents, %d gloves",
             len(search.state.index),

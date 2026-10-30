@@ -22,9 +22,8 @@ async def _imported(sessionmaker) -> None:
 
 
 async def _reloaded(sessionmaker) -> SearchService:
-    service = SearchService()
-    async with sessionmaker() as session:
-        await service.reload(session)
+    service = SearchService(sessionmaker)
+    await service.reload()
     return service
 
 
@@ -112,8 +111,7 @@ async def test_reload_picks_up_a_new_glove(sessionmaker):
         session.add(
             ForestMapEntry(glove="Біля старого клена", parts=["lystianyi"], map_document_id=map_id)
         )
-    async with sessionmaker() as session:
-        await service.reload(session)
+    await service.reload()
 
     pack = service.search("Що робити біля клена?")
     assert pack.gloves == ["Біля старого клена"]
@@ -164,4 +162,28 @@ async def test_index_is_built_off_the_event_loop_thread(sessionmaker, monkeypatc
 
 def test_search_before_reload_is_an_error():
     with pytest.raises(RuntimeError, match="reload"):
-        SearchService().search("Які гриби біля сосон?")
+        SearchService(None).search("Які гриби біля сосон?")
+
+
+async def test_reload_without_a_sessionmaker_is_an_error():
+    with pytest.raises(RuntimeError, match="no sessionmaker"):
+        await SearchService(None).reload()
+
+
+async def test_reload_ignores_an_uncommitted_insert_of_another_session(sessionmaker):
+    await _imported(sessionmaker)
+    service = SearchService(sessionmaker)
+    # Інша сесія тримає відкриту транзакцію з незакоміченою вставкою, як хендлер завантаження
+    # посеред збереження. reload має власну сесію: він не падає і не бачить вставки.
+    async with sessionmaker() as other:
+        map_id = await other.scalar(select(ForestMapEntry.map_document_id).limit(1))
+        other.add(
+            ForestMapEntry(glove="Біля старого клена", parts=["lystianyi"], map_document_id=map_id)
+        )
+        await other.flush()
+
+        await service.reload()
+
+        assert "Біля старого клена" not in service.state.resolver.gloves
+        assert len(service.state.resolver.gloves) == 8
+        await other.rollback()

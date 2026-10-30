@@ -13,9 +13,8 @@ from lisovyi.search.service import SearchService
 async def build_pack(settings: Settings, question: str, previous: str | None) -> ContextPack:
     engine = make_engine(settings.db_url())
     try:
-        service = SearchService(settings.context_char_budget)
-        async with make_sessionmaker(engine)() as session:
-            await service.reload(session)
+        service = SearchService(make_sessionmaker(engine), settings.context_char_budget)
+        await service.reload()
         return service.search(question, previous)
     finally:
         await engine.dispose()

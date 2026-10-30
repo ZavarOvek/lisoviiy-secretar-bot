@@ -51,7 +51,7 @@ class FakeLLM:
 
 
 def loaded_search(index: Bm25Index, resolver: PlaceResolver) -> SearchService:
-    search = SearchService()
+    search = SearchService(None)
     search._state = search_module._State(index, resolver)
     return search
 

@@ -11,13 +11,18 @@ from aiogram.methods import AnswerCallbackQuery, SendChatAction, SendMessage, Te
 from aiogram.types import CallbackQuery, Chat, Message, Update, User
 
 from lisovyi.answer.service import AnswerService, Reply
+from lisovyi.bot import texts as bot_texts
 from lisovyi.bot.handlers import (
-    CALLBACK_DATA_BYTES,
-    PLACE_PREFIX,
-    glove_from_callback,
-    place_keyboard,
     router,
     start_text,
+)
+from lisovyi.bot.places import (
+    PLACE_PREFIX,
+    all_places,
+    find_place,
+    glove_places,
+    place_hash,
+    place_keyboard,
 )
 from lisovyi.search import service as search_module
 from lisovyi.search.service import SearchService
@@ -153,7 +158,7 @@ async def test_text_message_is_a_question(bot, session):
     assert final.parse_mode is None
     buttons = [b for row in final.reply_markup.inline_keyboard for b in row]
     assert [b.text for b in buttons] == GLOVES
-    assert buttons[0].callback_data == PLACE_PREFIX + GLOVES[0]
+    assert buttons[0].callback_data == PLACE_PREFIX + place_hash(GLOVES[0])
 
 
 async def test_answer_without_keyboard_has_no_markup(bot, session):
@@ -168,67 +173,70 @@ async def test_unknown_command_is_not_a_question(bot, session):
     assert session.sent(SendMessage) == []
 
 
-@pytest.mark.parametrize(
-    "data", [PLACE_PREFIX + "У соснах", PLACE_PREFIX + str(GLOVES.index("У соснах"))]
-)
-async def test_place_button_is_a_followup(data, bot, session):
+async def test_place_button_is_a_followup(bot, session):
     answers = FakeAnswers(_reply())
-    await _feed(bot, _callback(data), answers)
+    await _feed(bot, _callback(PLACE_PREFIX + place_hash("У соснах")), answers)
     assert len(session.sent(AnswerCallbackQuery)) == 1
     assert answers.calls == [(42, "У соснах")]
     assert session.sent(SendMessage)[-1].text == _reply().text
 
 
-async def test_index_button_of_a_too_long_name_round_trips(bot, session):
-    long_name = "Біля найстарішого дуба на південному схилі"
+async def test_button_of_a_glove_removed_from_the_map(bot, session, caplog):
+    # Кнопку надіслано за старою картою; нова карта рукавичку «Під дубом» прибрала.
+    old_button = PLACE_PREFIX + place_hash("Під дубом")
+    answers = FakeAnswers(_reply(), gloves=[g for g in GLOVES if g != "Під дубом"])
+    await _feed(bot, _callback(old_button), answers)
+    assert len(session.sent(AnswerCallbackQuery)) == 1
+    assert answers.calls == []
+    assert session.sent(SendMessage)[-1].text == bot_texts.PLACE_GONE
+    assert "no longer on the map" in caplog.text
+
+
+async def test_long_glove_name_still_fits_into_callback_data(bot, session):
+    long_name = "Біля найстарішого дуба на південному схилі за ярком і струмком"
     gloves = ["Під дубом", long_name]
-    keyboard = place_keyboard(gloves)
+    keyboard = place_keyboard(glove_places(gloves))
     [button] = [b for row in keyboard.inline_keyboard for b in row if b.text == long_name]
-    assert button.callback_data == "place:1"
+    assert len(button.callback_data.encode()) <= 64
 
     answers = FakeAnswers(_reply(), gloves=gloves)
     await _feed(bot, _callback(button.callback_data), answers)
     assert answers.calls == [(42, long_name)]
 
 
-async def test_button_for_a_vanished_glove_is_ignored(bot, session):
-    answers = FakeAnswers(_reply())
-    await _feed(bot, _callback(PLACE_PREFIX + "Під кленом"), answers)
-    assert len(session.sent(AnswerCallbackQuery)) == 1
-    assert answers.calls == []
-
-
 # --- кнопки
 
 
-def test_archive_glove_names_fit_into_callback_data():
-    longest = max(GLOVES, key=lambda glove: len(glove.encode()))
-    assert len((PLACE_PREFIX + longest).encode()) <= CALLBACK_DATA_BYTES
-    keyboard = place_keyboard(GLOVES)
+def test_answer_keyboard_uses_hashes_two_per_row():
+    keyboard = place_keyboard(glove_places(GLOVES))
     data = [b.callback_data for row in keyboard.inline_keyboard for b in row]
-    assert data == [PLACE_PREFIX + glove for glove in GLOVES]
+    assert data == [PLACE_PREFIX + place_hash(glove) for glove in GLOVES]
+    assert all(len(d) == len("place:") + 10 for d in data)
     assert all(len(row) <= 2 for row in keyboard.inline_keyboard)
 
 
-def test_too_long_glove_name_switches_to_indexes():
-    long_name = "Біля найстарішого дуба на південному схилі"  # > 58 байт
-    assert len((PLACE_PREFIX + long_name).encode()) > CALLBACK_DATA_BYTES
-    gloves = ["Під дубом", long_name]
-    keyboard = place_keyboard(gloves)
-    data = [b.callback_data for row in keyboard.inline_keyboard for b in row]
-    assert data == ["place:0", "place:1"]
-    assert all(len(d.encode()) <= CALLBACK_DATA_BYTES for d in data)
-    assert glove_from_callback("place:1", gloves) == long_name
+def test_archive_places_have_distinct_hashes(archive_search):
+    _, resolver = archive_search
+    places = all_places(resolver.gloves)
+    assert len(places) == 8 + 3 + 1
+    assert [p.label for p in places[8:]] == [
+        "Хвойний ліс",
+        "Листяний ліс",
+        "Біля річки",
+        "Увесь ліс",
+    ]
+    assert len({place.key for place in places}) == len(places)
 
 
-def test_glove_from_callback():
-    assert glove_from_callback("place:Під дубом", GLOVES) == "Під дубом"
-    assert glove_from_callback("place:0", GLOVES) == GLOVES[0]
-    assert glove_from_callback("place:8", GLOVES) is None
-    assert glove_from_callback("place:Під кленом", GLOVES) is None
+def test_find_place():
+    places = all_places(GLOVES)
+    assert find_place(place_hash("Під дубом"), places).scope == "Під дубом"
+    assert find_place(place_hash("Хвойний ліс"), places).scope == "khvoinyi"
+    assert find_place(place_hash("Увесь ліс"), places).scope == "general"
+    assert find_place(place_hash("Під кленом"), places) is None
 
 
-def test_no_gloves_no_keyboard():
+def test_no_places_no_keyboard():
     assert place_keyboard([]) is None
 
 
@@ -237,12 +245,12 @@ async def test_old_glove_button_after_restart_asks_for_the_question(bot, session
         async def complete(self, messages, notify=None):
             raise AssertionError("the model must not be called")
 
-    search = SearchService()
+    search = SearchService(None)
     search._state = search_module._State(*archive_search)
     # Свіжий сервіс — порожня пам'ять, як після рестарту; кнопка лишилась в історії чату.
     answers = AnswerService(search, NoLLM(), dialogue_ttl=900)
     await DISPATCHER.feed_update(
-        bot, _callback(PLACE_PREFIX + "Під дубом"), answers=answers, search=search
+        bot, _callback(PLACE_PREFIX + place_hash("Під дубом")), answers=answers, search=search
     )
     assert session.sent(SendMessage)[-1].text.startswith(
         "Що саме хочеш дізнатися про рукавичку «Під дубом»?"
