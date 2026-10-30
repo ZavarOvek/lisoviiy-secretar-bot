@@ -7,16 +7,12 @@ import hashlib
 import io
 import json
 import logging
-import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath
 
 import docx
 import pypdf
-from docx.opc.exceptions import PackageNotFoundError
-from docx.table import Table
-from lxml.etree import XMLSyntaxError
-from pypdf.errors import PyPdfError
+from docx.table import Table, _Cell
 
 from lisovyi.domain import TextSource
 from lisovyi.ingest import ocr
@@ -27,6 +23,10 @@ log = logging.getLogger(__name__)
 
 class UnsupportedDocument(ValueError):
     """Файл, з якого не вдається отримати текст: невідомий формат, кодування чи пошкоджений."""
+
+
+class NoTextFound(UnsupportedDocument):
+    """Файл прочитано, але тексту в ньому немає: навіть OCR нічого не знайшов."""
 
 
 @dataclass(frozen=True)
@@ -92,38 +92,50 @@ def _decode_txt(data: bytes, filename: str) -> str:
 
 
 def _docx_text(data: bytes, filename: str) -> str:
+    # python-docx і lxml падають на зіпсованих файлах дуже різними винятками (BadZipFile,
+    # KeyError, XMLSyntaxError, ValueError…): будь-який із них означає «не можу прочитати».
     try:
         document = docx.Document(io.BytesIO(data))
-    except (zipfile.BadZipFile, PackageNotFoundError, KeyError, XMLSyntaxError) as exc:
-        raise UnsupportedDocument(f"{filename}: not a readable DOCX ({exc})") from exc
+        return "\n".join(_blocks_text(document.iter_inner_content()))
+    except Exception as exc:
+        raise UnsupportedDocument(f"{filename}: not a readable DOCX ({exc!r})") from exc
+
+
+def _blocks_text(blocks) -> list[str]:
+    """Абзаци й таблиці в порядку документа."""
     lines = []
-    # Абзаци й таблиці в порядку документа.
-    for block in document.iter_inner_content():
+    for block in blocks:
         if isinstance(block, Table):
             lines.extend(_table_lines(block))
         else:
             lines.append(block.text)
-    return "\n".join(lines)
+    return lines
 
 
 def _table_lines(table: Table) -> list[str]:
     lines = []
     for row in table.rows:
-        cells = []
+        cells: list[_Cell] = []
         for cell in row.cells:
             # Об'єднана клітинка повторюється в row.cells для кожної колонки, яку займає.
             if not cells or cell._tc is not cells[-1]._tc:
                 cells.append(cell)
-        lines.append(" | ".join(cell.text for cell in cells))
+        lines.append(" | ".join(_cell_text(cell) for cell in cells))
     return lines
 
 
+def _cell_text(cell: _Cell) -> str:
+    # cell.text бере лише абзаци; таблиця, вкладена в клітинку, з нього випадає.
+    return "\n".join(_blocks_text(cell.iter_inner_content()))
+
+
 def _pdf_text(data: bytes, filename: str, transcripts: TranscriptStore | None) -> Extracted:
+    # pypdf на битих файлах кидає не лише PyPdfError, а й ValueError, KeyError, TypeError…
     try:
         reader = pypdf.PdfReader(io.BytesIO(data))
         text = "\n".join(page.extract_text() or "" for page in reader.pages)
-    except PyPdfError as exc:
-        raise UnsupportedDocument(f"{filename}: not a readable PDF ({exc})") from exc
+    except Exception as exc:
+        raise UnsupportedDocument(f"{filename}: not a readable PDF ({exc!r})") from exc
     if text.strip():
         return Extracted(text, TextSource.TEXT)
 
@@ -137,5 +149,5 @@ def _pdf_text(data: bytes, filename: str, transcripts: TranscriptStore | None) -
 
     text = ocr.ocr_pdf(data)
     if not text.strip():
-        raise UnsupportedDocument(f"{filename}: OCR found no text")
+        raise NoTextFound(f"{filename}: OCR found no text")
     return Extracted(text, TextSource.OCR, ocr.find_review_items(text))

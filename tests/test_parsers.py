@@ -5,12 +5,18 @@ import shutil
 import zipfile
 
 import docx
+import pypdf
 import pytest
 
 from lisovyi.config import PROJECT_ROOT
 from lisovyi.domain import TextSource
 from lisovyi.ingest import ocr
-from lisovyi.ingest.parsers import TranscriptStore, UnsupportedDocument, extract_text
+from lisovyi.ingest.parsers import (
+    NoTextFound,
+    TranscriptStore,
+    UnsupportedDocument,
+    extract_text,
+)
 
 ARCHIVE = PROJECT_ROOT / "data" / "archive"
 TRANSCRIPTS = PROJECT_ROOT / "data" / "transcripts"
@@ -84,6 +90,41 @@ def test_docx_merged_cell_is_not_repeated():
         table.cell(0, 2).text = "3 шишки"
 
     assert extract_text(_docx_bytes(build), "a.docx", None).text == "Внесок | 3 шишки"
+
+
+def test_docx_nested_table_text_is_collected():
+    def build(document):
+        outer = document.add_table(rows=1, cols=2)
+        outer.cell(0, 0).text = "Нора"
+        cell = outer.cell(0, 1)
+        cell.text = "Внески:"
+        inner = cell.add_table(rows=1, cols=2)
+        inner.cell(0, 0).text = "дорослий"
+        inner.cell(0, 1).text = "3 шишки"
+
+    text = extract_text(_docx_bytes(build), "a.docx", None).text
+    # Word вимагає абзац після вкладеної таблиці, тож клітинка закінчується порожнім рядком.
+    assert text.split("\n") == ["Нора | Внески:", "дорослий | 3 шишки", ""]
+
+
+@pytest.mark.parametrize("error", [RuntimeError, ValueError, AttributeError, KeyError])
+def test_any_docx_library_error_is_unsupported(error, monkeypatch):
+    def broken(stream):
+        raise error("boom")
+
+    monkeypatch.setattr(docx, "Document", broken)
+    with pytest.raises(UnsupportedDocument, match="not a readable DOCX"):
+        extract_text(b"PK", "a.docx", None)
+
+
+@pytest.mark.parametrize("error", [RuntimeError, ValueError, KeyError, TypeError])
+def test_any_pdf_library_error_is_unsupported(error, monkeypatch):
+    def broken(stream):
+        raise error("boom")
+
+    monkeypatch.setattr(pypdf, "PdfReader", broken)
+    with pytest.raises(UnsupportedDocument, match="not a readable PDF"):
+        extract_text(b"%PDF-1.4", "a.pdf", None)
 
 
 @pytest.mark.parametrize("filename", ["Порада.doc", "Порада.rtf", "Порада"])
@@ -180,7 +221,7 @@ def test_unverified_transcript_is_used_with_warning(tmp_path, caplog, fake_ocr):
 
 def test_ocr_without_any_text_is_unsupported(monkeypatch):
     monkeypatch.setattr(ocr, "ocr_pdf", lambda data: " \n\n ")
-    with pytest.raises(UnsupportedDocument, match="OCR found no text"):
+    with pytest.raises(NoTextFound, match="OCR found no text"):
         extract_text((ARCHIVE / SCAN).read_bytes(), SCAN, None)
 
 
