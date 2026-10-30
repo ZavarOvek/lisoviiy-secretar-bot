@@ -79,10 +79,11 @@ class ContextPack:
         if place:
             blocks.append(place)
         for doc in self.docs:
-            header = f"[Джерело: {doc.filename} | {_layer_label(doc)}"
+            header = f"[Джерело: {_header_field(doc.filename)} | {_layer_label(doc)}"
             if doc.author_id is not None:
                 date = doc.created_at.strftime("%d.%m.%Y") if doc.created_at else "дата невідома"
-                header += f" | надіслав: {doc.author_name or 'невідомий звір'}, {date}"
+                author = _header_field(doc.author_name or "невідомий звір")
+                header += f" | надіслав: {author}, {date}"
             blocks.append(f"{header}]\n{doc.text.strip()}")
         return "\n\n".join(blocks)
 
@@ -95,6 +96,18 @@ class ContextPack:
         covered = {part for glove in self.gloves for part in self.glove_parts[glove]}
         named.extend(PART_NAMES[p] for p in self.parts if p not in covered)
         return f"Місце: {'; '.join(named)}" if named else ""
+
+
+_HEADER_UNSAFE = str.maketrans({"[": "(", "]": ")", "|": "/"})
+
+
+def _header_field(value: str) -> str:
+    """Поле заголовка джерела в один рядок і без символів його розмітки.
+
+    Ім'я звіра й назву файлу задають звірі: без цього вони могли б закрити заголовок
+    і дописати від себе підроблене «[Джерело: …]».
+    """
+    return " ".join(value.split()).translate(_HEADER_UNSAFE)
 
 
 def _layer_label(doc: ContextDoc) -> str:
