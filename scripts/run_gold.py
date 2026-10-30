@@ -10,7 +10,8 @@
     docker compose run --rm -v "$PWD:/app" bot python scripts/run_gold.py [--only T04,T12]
 
 `--model` підміняє GROQ_MODEL на один прогін і вимикає запасну модель: так видно якість
-саме цієї моделі.
+саме цієї моделі. `--reasoning-effort` і `--max-completion-tokens` так само перекривають
+GROQ_REASONING_EFFORT і GROQ_MAX_COMPLETION_TOKENS лише на цей прогін.
 """
 
 import argparse
@@ -66,6 +67,8 @@ def record(question: dict[str, Any], reply: Reply, settings: Settings) -> dict[s
         # Модель, що справді відповіла (з останньої спроби); без виклику LLM — налаштована.
         "model": reply.attempts[-1].model if reply.attempts else settings.groq_model,
         "fallback_model": settings.groq_fallback_model or None,
+        "reasoning_effort": settings.groq_reasoning_effort,
+        "max_completion_tokens": settings.groq_max_completion_tokens,
         "attempts": [asdict(attempt) for attempt in reply.attempts],
         "question": question["turns"][-1],
         "turns": question["turns"],
@@ -117,10 +120,19 @@ def summarize(rows: list[dict[str, Any]], gold: dict[str, dict[str, Any]]) -> No
     print("tokens: " + " ".join(f"{key.removesuffix('_tokens')}={n}" for key, n in totals.items()))
 
 
-async def main(only: set[str] | None, model: str | None) -> None:
+async def main(
+    only: set[str] | None,
+    model: str | None,
+    reasoning_effort: str | None = None,
+    max_completion_tokens: int | None = None,
+) -> None:
     settings = Settings()
     if model:
         settings = settings.model_copy(update={"groq_model": model, "groq_fallback_model": ""})
+    if reasoning_effort:
+        settings = settings.model_copy(update={"groq_reasoning_effort": reasoning_effort})
+    if max_completion_tokens:
+        settings = settings.model_copy(update={"groq_max_completion_tokens": max_completion_tokens})
     if not settings.groq_api_key:
         raise SystemExit("GROQ_API_KEY is not set")
     gold = {item["id"]: item for item in json.loads(GOLD.read_text(encoding="utf-8"))}
@@ -159,7 +171,11 @@ async def main(only: set[str] | None, model: str | None) -> None:
             file.write(json.dumps(row, ensure_ascii=False) + "\n")
             file.flush()
     print(f"written: {out.relative_to(PROJECT_ROOT)}")
-    print(f"model: {settings.groq_model}, fallback: {settings.groq_fallback_model or '-'}")
+    print(
+        f"model: {settings.groq_model}, fallback: {settings.groq_fallback_model or '-'}, "
+        f"reasoning_effort: {settings.groq_reasoning_effort}, "
+        f"max_completion_tokens: {settings.groq_max_completion_tokens}"
+    )
     summarize(rows, gold)
 
 
@@ -170,6 +186,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="python scripts/run_gold.py")
     parser.add_argument("--only", help="comma-separated gold ids, e.g. T04,T12")
     parser.add_argument("--model", help="Groq model for this run only; disables the fallback")
+    parser.add_argument(
+        "--reasoning-effort", choices=["low", "medium", "high"], help="for this run only"
+    )
+    parser.add_argument(
+        "--max-completion-tokens", type=int, help="completion budget for this run only"
+    )
     args = parser.parse_args()
     only = {item.strip() for item in args.only.split(",") if item.strip()} if args.only else None
-    asyncio.run(main(only, args.model))
+    if args.max_completion_tokens is not None and args.max_completion_tokens <= 0:
+        parser.error("--max-completion-tokens must be positive")
+    asyncio.run(main(only, args.model, args.reasoning_effort, args.max_completion_tokens))
