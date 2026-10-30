@@ -17,6 +17,7 @@ from telegram_fakes import (
 
 from lisovyi.answer.service import Reply
 from lisovyi.bot import texts
+from lisovyi.bot.handlers import COMMANDS
 from lisovyi.bot.places import place_hash
 from lisovyi.bot.uploads import UploadDialogue
 from lisovyi.config import PROJECT_ROOT
@@ -493,3 +494,44 @@ async def test_unreadable_map(world, text):
     await send_file(world, "Карта лісу.txt", text.encode())
     assert last_text(world) == texts.MAP_UNREADABLE
     assert world.dialogue.live(42) is None
+
+
+# --- /name
+
+
+async def test_name_without_argument(world):
+    await feed(world, message_update("/name"))
+    assert last_text(world) == texts.NOT_NAMED
+    await registered(world)
+    await feed(world, message_update("/name"))
+    assert last_text(world) == "Вас звати Їжак Колючий. Щоб змінити ім'я, напишіть: /name Нове Ім'я"
+    assert world.questions.calls == []
+
+
+async def test_name_change_reaches_saved_documents(world):
+    await registered(world)
+    await send_file(world, "порада.txt", VERBA_ADVICE.encode())
+    await feed(world, message_update("/name Пан Їжак"))
+    assert last_text(world) == "Готово, тепер ви — Пан Їжак."
+    [document] = [
+        d for d in world.dialogue.service.search.state.index.documents if d.filename == "порада.txt"
+    ]
+    assert document.author_name == "Пан Їжак"
+
+
+@pytest.mark.parametrize("raw", ["Я", "Їжак123", "a" * 41])
+async def test_name_validation(world, raw):
+    await registered(world)
+    await feed(world, message_update(f"/name {raw}"))
+    assert last_text(world) == texts.BAD_NAME
+    assert (await world.dialogue.service.beast(42)).name == "Їжак Колючий"
+
+
+async def test_name_cannot_register_a_new_beast(world):
+    await feed(world, message_update("/name Сова"))
+    assert last_text(world) == texts.NOT_NAMED
+    assert await world.dialogue.service.beast(42) is None
+
+
+def test_name_is_in_the_bot_commands():
+    assert [(c.command, c.description) for c in COMMANDS][-1] == ("name", "Змінити своє ім'я")

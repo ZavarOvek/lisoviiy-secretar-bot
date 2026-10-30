@@ -20,6 +20,7 @@ router = Router()
 COMMANDS = [
     BotCommand(command="start", description="Що я вмію"),
     BotCommand(command="help", description="Довідка"),
+    BotCommand(command="name", description="Змінити своє ім'я"),
 ]
 
 TYPING_REPEAT = 5.0

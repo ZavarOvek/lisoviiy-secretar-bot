@@ -17,7 +17,7 @@ from pathlib import PurePath
 
 from aiogram import Bot, F, Router
 from aiogram.enums import ChatAction
-from aiogram.filters import Filter
+from aiogram.filters import Command, CommandObject, Filter
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
@@ -512,6 +512,28 @@ class AwaitingName(Filter):
 
     async def __call__(self, message: Message, uploads: UploadDialogue) -> bool:
         return uploads.awaiting_name(message.chat.id)
+
+
+@uploads_router.message(Command("name"))
+async def name_command(
+    message: Message, command: CommandObject, bot: Bot, uploads: UploadDialogue
+) -> None:
+    """/name — показати ім'я; /name Нове Ім'я — змінити. Зареєструватися так не можна:
+    ім'я бот просить разом із першою порадою (вимога 12)."""
+    assert message.from_user is not None
+    service = uploads.service
+    if not command.args:
+        beast = await service.beast(message.from_user.id)
+        text = texts.NOT_NAMED if beast is None else texts.CURRENT_NAME.format(name=beast.name)
+        await _send(bot, message.chat.id, text)
+        return
+    name = valid_name(command.args)
+    if name is None:
+        await _send(bot, message.chat.id, texts.BAD_NAME)
+        return
+    beast = await service.rename(message.from_user.id, name)
+    text = texts.NOT_NAMED if beast is None else texts.NAME_CHANGED.format(name=name)
+    await _send(bot, message.chat.id, text)
 
 
 @uploads_router.message(F.document)
