@@ -4,14 +4,29 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
+from groq import AsyncGroq
 
-from lisovyi.bot.handlers import router
+from lisovyi.answer.llm import LLMClient
+from lisovyi.answer.service import AnswerService
+from lisovyi.bot.handlers import COMMANDS, router
 from lisovyi.config import Settings
 from lisovyi.db.session import make_engine, make_sessionmaker, run_migrations
 from lisovyi.ingest.importer import import_archive
 from lisovyi.search.service import SearchService
 
 log = logging.getLogger("lisovyi")
+
+
+def make_llm(settings: Settings) -> LLMClient:
+    # Повтори SDK вимкнені: 429 обробляє LLMClient, щоб звір бачив, що відбувається.
+    client = AsyncGroq(api_key=settings.groq_api_key, max_retries=0, timeout=30)
+    return LLMClient(
+        client,
+        settings.groq_model,
+        fallback_model=settings.groq_fallback_model,
+        reasoning_effort=settings.groq_reasoning_effort,
+        max_completion_tokens=settings.groq_max_completion_tokens,
+    )
 
 
 async def run(settings: Settings, db_url: str) -> None:
@@ -36,14 +51,30 @@ async def run(settings: Settings, db_url: str) -> None:
             len(search.state.resolver.gloves),
         )
 
-        # Токен перевіряється після імпорту: без нього база все одно має бути готова.
+        # Токени перевіряються після імпорту: без них база все одно має бути готова.
         if not settings.telegram_bot_token:
             raise SystemExit("TELEGRAM_BOT_TOKEN is not set: archive imported, bot not started")
+        if not settings.groq_api_key:
+            raise SystemExit("GROQ_API_KEY is not set: archive imported, bot not started")
+        answers = AnswerService(
+            search, make_llm(settings), dialogue_ttl=settings.dialogue_ttl_seconds
+        )
+        log.info(
+            "llm: model=%s fallback=%s reasoning_effort=%s max_completion_tokens=%d",
+            settings.groq_model,
+            settings.groq_fallback_model or "-",
+            settings.groq_reasoning_effort,
+            settings.groq_max_completion_tokens,
+        )
+
         bot = Bot(settings.telegram_bot_token)
+        await bot.set_my_commands(COMMANDS)
+        log.info("bot commands: %s", ", ".join(command.command for command in COMMANDS))
         dispatcher = Dispatcher()
         dispatcher.include_router(router)
-        # Пошук іде в хендлери як залежність; самі хендлери питань з'являться в брифі 03.
-        await dispatcher.start_polling(bot, sessionmaker=sessionmaker, search=search)
+        await dispatcher.start_polling(
+            bot, sessionmaker=sessionmaker, search=search, answers=answers
+        )
     finally:
         await engine.dispose()
 
