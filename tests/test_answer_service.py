@@ -10,7 +10,13 @@ from groq_fakes import FakeGroq, completion
 from lisovyi.answer import texts
 from lisovyi.answer.llm import Completion, LLMBroken, LLMBusy, LLMClient, OutputRejected, Usage
 from lisovyi.answer.prompt import RESPONSE_FORMAT, SYSTEM_PROMPT
-from lisovyi.answer.service import MAX_MESSAGE_CHARS, AnswerService, clean_text, truncate
+from lisovyi.answer.service import (
+    MAX_MESSAGE_CHARS,
+    AnswerService,
+    clean_text,
+    drop_part_label,
+    truncate,
+)
 from lisovyi.domain import DocumentKind, ForestPart
 from lisovyi.search import service as search_module
 from lisovyi.search.index import Bm25Index, SearchDocument
@@ -633,3 +639,40 @@ async def test_wait_message_is_sent_once_across_both_paths(search):
 
     await service(search, llm).answer(1, WARMING, notify)
     assert sent == [texts.WAIT]
+
+
+@pytest.mark.parametrize(
+    ("part", "text", "expected"),
+    [
+        (ForestPart.LYSTIANYI, "У листяному лісі гриби з'являються на 4–5 день",
+         "Гриби з'являються на 4–5 день"),
+        (ForestPart.RICHKA, "Біля річки, підніміть рукавичку на коріння",
+         "Підніміть рукавичку на коріння"),
+        (ForestPart.RICHKA, "Для тих, хто біля річки: утеплюйте очеретом", "Утеплюйте очеретом"),
+        (ForestPart.LYSTIANYI, "Утеплюйте сухим листям, у листяному лісі його багато",
+         "Утеплюйте сухим листям, у листяному лісі його багато"),
+        (ForestPart.LYSTIANYI, "Біля річки інакше", "Біля річки інакше"),
+        (ForestPart.KHVOINYI, "В хвойному лісі: утеплюйте в жовтні", "Утеплюйте в жовтні"),
+        (ForestPart.RICHKA, "коло річки опеньки йдуть раніше", "Опеньки йдуть раніше"),
+        (ForestPart.LYSTIANYI, "У листяному лісі.", "У листяному лісі."),
+        (ForestPart.LYSTIANYI, "У листяному лісі", "У листяному лісі"),
+    ],
+)  # fmt: skip
+def test_drop_part_label(part, text, expected):
+    assert drop_part_label(text, part) == expected
+
+
+async def test_part_label_is_dropped_only_from_its_own_item(search):
+    leaf = _number(search, WARMING, "Як утеплити рукавичку в листяному лісі.docx")
+    river = _number(search, WARMING, "Як утеплити рукавичку біля річки.pdf")
+    llm = FakeLLM(
+        by_part(
+            ("lystianyi", "У листяному лісі утеплюйте листям.", [leaf]),
+            ("richka", "Біля річки, утеплюйте очеретом.", [river]),
+            ("general", "Біля річки й у листяному лісі утеплюють у листопаді.", [1]),
+        )
+    )
+    reply = await service(search, llm).answer(1, WARMING)
+    assert "Листяний ліс: Утеплюйте листям." in reply.text
+    assert "Біля річки: Утеплюйте очеретом." in reply.text
+    assert "Для всього лісу: Біля річки й у листяному лісі утеплюють у листопаді." in reply.text

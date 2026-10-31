@@ -185,7 +185,10 @@ class AnswerService:
             glove=conflict.glove,
             parts=", ".join(f"і до {texts.PART_GENITIVE[part]}" for part in parts),
         )
-        lines = [f"{texts.PART_LINE[part]}: {clean_text(items[part.value][0])}" for part in parts]
+        lines = [
+            f"{texts.PART_LINE[part]}: {drop_part_label(clean_text(items[part.value][0]), part)}"
+            for part in parts
+        ]
         if "general" in items:
             lines.append(f"{texts.CONFLICT_GENERAL}: {clean_text(items['general'][0])}")
         numbers = sorted({n for _, sources in items.values() for n in sources})
@@ -312,6 +315,30 @@ def parse_completion(completion: Completion, pack_size: int) -> _Parsed | None:
     if not clean_text(text) or (kind in KINDS_NEEDING_SOURCES and not numbers):
         return None
     return _Parsed(kind, text, numbers)
+
+
+# Мітку частини ставить бот, а модель часто повторює її сама на початку пункту:
+# «Листяний ліс: У листяному лісі утеплюйте…». Лише на початку і лише для своєї частини.
+_PART_LABEL = {
+    ForestPart.KHVOINYI: r"[ув]\s+хвойному\s+лісі",
+    ForestPart.LYSTIANYI: r"[ув]\s+листяному\s+лісі",
+    ForestPart.RICHKA: r"для\s+тих,\s+хто\s+біля\s+річки|біля\s+річки|коло\s+річки",
+}
+_PART_LABEL_AT_START = {
+    part: re.compile(rf"^(?:{pattern})(?=[\s,:]|$)[\s,:]*", re.IGNORECASE)
+    for part, pattern in _PART_LABEL.items()
+}
+
+
+def drop_part_label(text: str, part: ForestPart) -> str:
+    """«У листяному лісі гриби…» → «Гриби…» для пункту листяного лісу.
+
+    Порожній залишок — повертається оригінал; посеред тексту нічого не прибирається.
+    """
+    rest = _PART_LABEL_AT_START[part].sub("", text, count=1)
+    if rest == text or not rest.strip():
+        return text
+    return rest[0].upper() + rest[1:]
 
 
 def parse_by_part(
