@@ -30,6 +30,8 @@ MAX_MESSAGE_CHARS = 4000
 DELETE_LABEL_CHARS = 30
 # Скільки документів (і кнопок 🗑) в одному повідомленні /my.
 MY_PER_MESSAGE = 40
+# Назва в рядку /my: довша обрізається, щоб навіть один рядок влазив у повідомлення.
+MY_TITLE_CHARS = 200
 
 
 # --- /help
@@ -136,11 +138,8 @@ async def my_command(message: Message, bot: Bot, library: Library) -> None:
     if not rows:
         await bot.send_message(message.chat.id, texts.MY_NONE, parse_mode=None)
         return
-    for start in range(0, len(rows), MY_PER_MESSAGE):
-        chunk = rows[start : start + MY_PER_MESSAGE]
-        lines = [
-            f"— {row.title} ({_place_label(row)}, {display_date(row.created_at)})" for row in chunk
-        ]
+    for chunk in _my_chunks(rows):
+        lines = [_my_line(row) for row in chunk]
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
@@ -154,6 +153,26 @@ async def my_command(message: Message, bot: Bot, library: Library) -> None:
         await bot.send_message(
             message.chat.id, "\n".join(lines), parse_mode=None, reply_markup=keyboard
         )
+
+
+def _my_line(row: DocumentRow) -> str:
+    title = row.title if len(row.title) <= MY_TITLE_CHARS else row.title[: MY_TITLE_CHARS - 1] + "…"
+    return f"— {title} ({_place_label(row)}, {display_date(row.created_at)})"
+
+
+def _my_chunks(rows: Sequence[DocumentRow]) -> list[list[DocumentRow]]:
+    """Не більше MY_PER_MESSAGE документів і MAX_MESSAGE_CHARS символів на повідомлення:
+    назва — це назва файлу звіра, і довжину її ніщо не обмежує."""
+    chunks: list[list[DocumentRow]] = [[]]
+    size = 0
+    for row in rows:
+        line = len(_my_line(row)) + 1
+        if chunks[-1] and (len(chunks[-1]) >= MY_PER_MESSAGE or size + line > MAX_MESSAGE_CHARS):
+            chunks.append([])
+            size = 0
+        chunks[-1].append(row)
+        size += line
+    return chunks
 
 
 def _place_label(row: DocumentRow) -> str:

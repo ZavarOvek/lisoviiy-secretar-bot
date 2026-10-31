@@ -1,6 +1,6 @@
 """/help, /docs, /my з видаленням, підписки — через справжній Dispatcher і БД (бриф 05)."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -182,7 +182,7 @@ def test_glove_with_one_part_and_empty_group():
 def test_long_list_is_split_on_line_boundaries():
     rows = [
         DocumentRow(i, f"Порада номер {i:03d} " + "ж" * 60, DocumentKind.GLOVE, "Під дубом",
-                    None, None, datetime(2026, 10, 31))
+                    None, None, datetime(2026, 10, 31, tzinfo=UTC))
         for i in range(120)
     ]  # fmt: skip
     text = group_text(Place("Під дубом", DocumentKind.GLOVE, "Під дубом"), rows, [])
@@ -299,3 +299,37 @@ async def test_subscribe_and_unsubscribe(world):
     await feed(world, message_update("/unsubscribe"))
     assert last(world).text == texts.NOT_SUBSCRIBED
     assert await world.notifier.subscribers() == []
+
+
+def test_my_chunks_respect_length_and_count():
+    from lisovyi.bot.library import _my_chunks, _my_line
+
+    long_rows = [
+        DocumentRow(
+            i,
+            "Д" * 250,
+            DocumentKind.GLOVE,
+            "Під дубом",
+            1,
+            "Їжак",
+            datetime(2026, 10, 31, tzinfo=UTC),  # fmt: skip
+        )
+        for i in range(30)
+    ]
+    chunks = _my_chunks(long_rows)
+    assert sum(len(c) for c in chunks) == 30
+    assert all(len("\n".join(_my_line(r) for r in c)) <= 4000 for c in chunks)
+    assert len(_my_line(long_rows[0])) < 260
+    short_rows = [
+        DocumentRow(
+            i,
+            f"п{i}",
+            DocumentKind.GLOVE,
+            "Під дубом",
+            1,
+            "Їжак",
+            datetime(2026, 10, 31, tzinfo=UTC),
+        )
+        for i in range(90)
+    ]
+    assert [len(c) for c in _my_chunks(short_rows)] == [40, 40, 10]

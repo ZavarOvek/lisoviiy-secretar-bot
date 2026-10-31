@@ -195,9 +195,18 @@ def _intro_sentences(text: str) -> list[str]:
     """
     stripped = text.strip()
     head, newline, body = stripped.partition("\n")
-    heading = bool(newline) and not head.rstrip().endswith((".", "!", "?", "…"))
-    flat = " ".join((body if heading else stripped).split())
-    return [s for s in re.split(r"(?<=[.!?…])\s+", flat) if s][:SENTENCES_TO_CHECK]
+    if not newline:
+        return _sentences(stripped)[:SENTENCES_TO_CHECK]
+    rest = _sentences(body)[:SENTENCES_TO_CHECK]
+    if head.rstrip().endswith((".", "!", "?", "…")):
+        # Перший рядок — речення або вигук («Увага!»): перевіряємо і його, але вікно
+        # з трьох речень після нього лишається таким самим, як із заголовком.
+        return _sentences(head) + rest
+    return rest
+
+
+def _sentences(text: str) -> list[str]:
+    return [s for s in re.split(r"(?<=[.!?…])\s+", " ".join(text.split())) if s]
 
 
 def upload_topic(title: str) -> tuple[str, bool]:

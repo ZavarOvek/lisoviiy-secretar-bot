@@ -101,7 +101,11 @@ class Notifier:
             await self._bot.send_message(chat_id, text, parse_mode=None)
         except TelegramForbiddenError:
             log.info("chat %d blocked the bot: unsubscribing it", chat_id)
-            await self.unsubscribe(chat_id)
+            try:
+                await self.unsubscribe(chat_id)
+            except Exception as exc:
+                # Збій БД тут не має зупинити розсилку решті підписників.
+                log.warning("chat %d: unsubscribe failed: %s", chat_id, type(exc).__name__)
         except TelegramRetryAfter as exc:
             if retried:
                 log.warning("chat %d: still rate limited, skipping", chat_id)
@@ -118,11 +122,23 @@ class Notifier:
 
     def _finished(self, task: asyncio.Task[None]) -> None:
         self._tasks.discard(task)
-        if not task.cancelled() and task.exception() is not None:
+        if task.cancelled():
+            log.warning("notification task was cancelled before it finished")
+            return
+        if task.exception() is not None:
             # Виняток фонової задачі інакше зник би мовчки.
             log.error("notification task failed", exc_info=task.exception())
 
-    async def drain(self) -> None:
-        """Дочекатися всіх фонових розсилок (для тестів і зупинки бота)."""
-        while self._tasks:
+    async def drain(self, timeout: float | None = None) -> None:
+        """Дочекатися всіх фонових розсилок (для тестів і зупинки бота).
+
+        Після `timeout` секунд недороблені розсилки скасовуються, і це видно в лозі.
+        """
+        try:
+            async with asyncio.timeout(timeout):
+                while self._tasks:
+                    await asyncio.gather(*list(self._tasks), return_exceptions=True)
+        except TimeoutError:
+            for task in list(self._tasks):
+                task.cancel()
             await asyncio.gather(*list(self._tasks), return_exceptions=True)

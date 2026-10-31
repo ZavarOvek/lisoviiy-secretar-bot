@@ -244,6 +244,11 @@ async def test_glove_buttons_under_variants_and_ask_place(kind, buttons, honey_s
         ("Утепліть ваші рукавички мохом.", "Утепліть рукавички мохом."),
         ("Дякуємо за ваші поради і вашу пораду.", "Дякуємо за ваші поради і вашу пораду."),
         ("Ваш дім — ваша фортеця.", "Ваш дім — ваша фортеця."),
+        # Ввічливе «Вашій» посеред речення великої літери на «рукавичку» не передає.
+        ("У Вашій рукавичці «У соснах» горіхи.", "У рукавичці «У соснах» горіхи."),
+        ("Порада для Вашої рукавички: утеплюйте.", "Порада для рукавички: утеплюйте."),
+        ("Тепло. Ваша рукавичка суха.", "Тепло. Рукавичка суха."),
+        ("Перше.\nВашу рукавичку видно.", "Перше.\nРукавичку видно."),
     ],
 )
 def test_clean_text_drops_presumed_possession_of_the_glove(raw, clean):
@@ -498,9 +503,22 @@ async def test_conflict_answer_is_built_by_the_bot(search):
     assert reply.sources == [pack.docs[first - 1].filename, pack.docs[second - 1].filename]
 
 
+def _parts(search) -> tuple[int, int, int]:
+    """Номери в пакеті WARMING: порада листяного лісу, біля річки і ще один запис (1).
+
+    Записів усього лісу в цьому пакеті немає (їх витісняє бюджет), а пункт general може
+    посилатися на будь-який запис пакета.
+    """
+    leaf = _number(search, WARMING, "Як утеплити рукавичку в листяному лісі.docx")
+    river = _number(search, WARMING, "Як утеплити рукавичку біля річки.pdf")
+    assert 1 not in (leaf, river)
+    return leaf, river, 1
+
+
 async def test_conflict_request_uses_another_schema_and_the_same_system_prompt(search):
+    leaf, river, _ = _parts(search)
     llm = FakeLLM(
-        by_part(("lystianyi", "Листя.", [1]), ("richka", "Очерет.", [2])),
+        by_part(("lystianyi", "Листя.", [leaf]), ("richka", "Очерет.", [river])),
         reply_json(),
     )
     answers = service(search, llm)
@@ -526,11 +544,12 @@ async def test_conflict_request_uses_another_schema_and_the_same_system_prompt(s
 
 
 async def test_conflict_answer_with_a_general_item(search):
+    leaf, river, calendar = _parts(search)
     llm = FakeLLM(
         by_part(
-            ("lystianyi", "Листям.", [1]),
-            ("richka", "Очеретом.", [2]),
-            ("general", "Утеплюють у листопаді.", [3]),
+            ("lystianyi", "Листям.", [leaf]),
+            ("richka", "Очеретом.", [river]),
+            ("general", "Утеплюють у листопаді.", [calendar]),
         )
     )
     reply = await service(search, llm).answer(1, WARMING)
@@ -554,6 +573,8 @@ async def test_unusable_conflict_answer_is_retried_then_falls_back(bad, search, 
     with caplog.at_level(logging.WARNING):
         reply = await service(search, llm).answer(1, WARMING)
     assert len(llm.calls) == 3
+    # Усі три виклики питання видно у відповіді: і два по частинах, і звичайний.
+    assert len(reply.attempts) == 3 and len(reply.raw) == 3
     assert llm.formats[0] == llm.formats[1] != llm.formats[2]
     assert reply.kind == "answer"
     assert reply.text.startswith("Звичайна відповідь.")
@@ -561,9 +582,10 @@ async def test_unusable_conflict_answer_is_retried_then_falls_back(bad, search, 
 
 
 async def test_conflict_retry_succeeds(search):
+    leaf, river, _ = _parts(search)
     llm = FakeLLM(
-        by_part(("lystianyi", "Листям.", [1])),
-        by_part(("lystianyi", "Листям.", [1]), ("richka", "Очеретом.", [2])),
+        by_part(("lystianyi", "Листям.", [leaf])),
+        by_part(("lystianyi", "Листям.", [leaf]), ("richka", "Очеретом.", [river])),
     )
     reply = await service(search, llm).answer(1, WARMING)
     assert (reply.kind, reply.retries, len(llm.calls)) == ("conflict", 1, 2)
@@ -579,3 +601,35 @@ async def test_no_conflict_keeps_the_usual_path(search):
     reply = await service(search, llm).answer(1, "Чим утеплити рукавичку біля бобрової греблі?")
     assert reply.kind == "answer"
     assert llm.formats == [None]
+
+
+async def test_merged_advice_citing_one_part_is_not_a_per_part_answer(search, caplog):
+    leaf = _number(search, WARMING, "Як утеплити рукавичку в листяному лісі.docx")
+    merged = by_part(("lystianyi", "Сухим листям.", [leaf]), ("richka", "Сухим листям.", [leaf]))
+    llm = FakeLLM(merged, merged, reply_json(text="Звичайна відповідь.", sources=[1]))
+    with caplog.at_level(logging.WARNING):
+        reply = await service(search, llm).answer(1, WARMING)
+    assert reply.kind == "answer"
+    assert "unusable answer by part, falling back" in caplog.text
+
+
+async def test_fallback_usage_counts_every_call(search):
+    llm = FakeLLM(raw_completion("{"), raw_completion("{"), reply_json())
+    reply = await service(search, llm).answer(1, WARMING)
+    assert reply.usage == USAGE + USAGE + USAGE
+
+
+async def test_wait_message_is_sent_once_across_both_paths(search):
+    class WaitingLLM(FakeLLM):
+        async def complete(self, messages, notify=None, response_format=None):
+            await notify(texts.WAIT)
+            return await super().complete(messages, notify, response_format)
+
+    llm = WaitingLLM(raw_completion("{"), raw_completion("{"), reply_json())
+    sent = []
+
+    async def notify(text: str) -> None:
+        sent.append(text)
+
+    await service(search, llm).answer(1, WARMING, notify)
+    assert sent == [texts.WAIT]

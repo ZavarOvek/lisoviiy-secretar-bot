@@ -20,7 +20,7 @@ from lisovyi.answer.prompt import (
 from lisovyi.domain import ForestPart
 from lisovyi.search.conflicts import PartConflict, detect_part_conflict
 from lisovyi.search.places import PlaceResolver, Places
-from lisovyi.search.retrieve import ContextDoc, ContextPack, Mode, display_date
+from lisovyi.search.retrieve import ContextDoc, ContextPack, Layer, Mode, display_date
 from lisovyi.search.service import SearchService
 
 log = logging.getLogger(__name__)
@@ -52,6 +52,15 @@ class Reply:
     raw: list[str] = field(default_factory=list)
     retries: int = 0
     # Кожен виклик моделі: хто відповів і чи не обрізано відповідь лімітом токенів.
+    attempts: list["Attempt"] = field(default_factory=list)
+
+
+@dataclass
+class _Spent:
+    """Виклики моделі, вже витрачені на це питання (шлях по частинах перед звичайним)."""
+
+    usage: Usage | None = None
+    raw: list[str] = field(default_factory=list)
     attempts: list["Attempt"] = field(default_factory=list)
 
 
@@ -96,30 +105,37 @@ class AnswerService:
             if pack.mode == Mode.ASK_GLOVE:
                 gloves = self.search.state.resolver.gloves
                 return Reply(texts.ASK_GLOVE, gloves, "ask_glove", [], None, pack.mode, context)
+            # «Відповім за хвилинку» — не більше одного разу на питання, хоч би скільки
+            # викликів моделі воно коштувало.
+            notify = _once(notify) if notify is not None else None
             state = self.search.state
             conflict = detect_part_conflict(question, pack, state.index, state.resolver)
+            spent = _Spent()
             if conflict is not None:
-                reply = await self._ask_by_part(question, pack, conflict, notify)
+                reply = await self._ask_by_part(question, pack, conflict, notify, spent)
                 if reply is not None:
                     return reply
-            return await self._ask_model(question, pack, notify)
+            return await self._ask_model(question, pack, notify, spent)
 
     async def _ask_by_part(
-        self, question: str, pack: ContextPack, conflict: PartConflict, notify: Notify | None
+        self,
+        question: str,
+        pack: ContextPack,
+        conflict: PartConflict,
+        notify: Notify | None,
+        spent: "_Spent",
     ) -> Reply | None:
         """Вимога 8: окремий пункт для кожної частини, вступ і завершення — від бота.
 
         Модель не має де обрати одну пораду. None — відповідь двічі непридатна, і тоді
-        питання йде звичайним шляхом.
+        питання йде звичайним шляхом; витрачені виклики лишаються в `spent`, щоб звичайна
+        відповідь звітувала про всі виклики й токени питання.
         """
         parts = list(conflict.docs)
         messages = build_conflict_messages(question, pack, conflict.glove, parts)
         response_format = conflict_response_format(parts)
         context = [doc.filename for doc in pack.docs]
-        usage: Usage | None = None
-        raw: list[str] = []
-        attempts: list[Attempt] = []
-        notify = _once(notify) if notify is not None else None
+        usage, raw, attempts = spent.usage, spent.raw, spent.attempts
         for attempt in range(ATTEMPTS):
             try:
                 completion = await self.llm.complete(messages, notify, response_format)
@@ -140,8 +156,8 @@ class AnswerService:
                     completion.usage.completion_tokens if completion.usage else None,
                 )
             )
-            usage = _add(usage, completion.usage)
-            items = parse_by_part(completion, parts, len(pack.docs))
+            usage = spent.usage = _add(usage, completion.usage)
+            items = parse_by_part(completion, parts, pack)
             log.info(
                 "llm by part: model=%s glove=%s valid=%s question=%r",
                 completion.model,
@@ -189,13 +205,12 @@ class AnswerService:
             attempts=attempts,
         )
 
-    async def _ask_model(self, question: str, pack: ContextPack, notify: Notify | None) -> Reply:
+    async def _ask_model(
+        self, question: str, pack: ContextPack, notify: Notify | None, spent: "_Spent"
+    ) -> Reply:
         messages = build_messages(question, pack)
         context = [doc.filename for doc in pack.docs]
-        usage: Usage | None = None
-        raw: list[str] = []
-        attempts: list[Attempt] = []
-        notify = _once(notify) if notify is not None else None
+        usage, raw, attempts = spent.usage, spent.raw, spent.attempts
         for attempt in range(ATTEMPTS):
             try:
                 completion = await self.llm.complete(messages, notify)
@@ -300,13 +315,16 @@ def parse_completion(completion: Completion, pack_size: int) -> _Parsed | None:
 
 
 def parse_by_part(
-    completion: Completion, parts: list[ForestPart], pack_size: int
+    completion: Completion, parts: list[ForestPart], pack: ContextPack
 ) -> dict[str, tuple[str, list[int]]] | None:
     """Пункти відповіді по частинах: частина (або "general") → (текст, номери джерел).
 
-    None — непридатно: немає пункту якоїсь частини, текст порожній після чистки або жодного
-    валідного джерела. Номери поза пакетом відкидаються.
+    None — непридатно: немає пункту якоїсь частини, текст порожній після чистки або пункт
+    частини не посилається на жоден документ цієї частини з пакета (інакше модель могла б
+    злити обидві поради в одну, а бот усе одно сказав би, що вони різняться). Номери поза
+    пакетом відкидаються.
     """
+    pack_size = len(pack.docs)
     if completion.finish_reason == "length":
         return None
     try:
@@ -335,7 +353,10 @@ def parse_by_part(
         )
         items[part] = (text, numbers)
     for part in parts:
-        if part.value not in items or not items[part.value][1]:
+        if part.value not in items:
+            return None
+        cited = [pack.docs[n - 1] for n in items[part.value][1]]
+        if not any(doc.layer == Layer.PART and doc.scope == part.value for doc in cited):
             return None
     return items
 
@@ -385,12 +406,20 @@ def _drop_presumed_glove(text: str) -> str:
     for match in _PRESUMED_GLOVE.finditer(text):
         out.append(text[position : match.start()])
         position = match.end()
-        if match[1] == "В" and position < len(text):
-            # «Ваш…» починало речення: велика літера переходить на «рукавич…».
+        if _starts_sentence(text, match.start()) and position < len(text):
+            # «Ваш…» починало речення: велика літера переходить на «рукавич…». Ввічливе
+            # «Вашій» посеред речення великої літери не передає.
             out.append(text[position].upper())
             position += 1
     out.append(text[position:])
     return "".join(out)
+
+
+_BEFORE_SENTENCE = re.compile(r"(?:^|[.!?…]\s+|\n\s*)$")
+
+
+def _starts_sentence(text: str, position: int) -> bool:
+    return _BEFORE_SENTENCE.search(text[:position]) is not None
 
 
 _SENTENCE_END = re.compile(r"[.!?…](?=\s)")

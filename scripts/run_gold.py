@@ -40,8 +40,9 @@ EXPECTED_KIND = {
     "answer_with_caveat": {"answer"},
     "answer_general_only": {"answer"},
     "answer_general_plus_glove_note": {"answer"},
-    # Бриф 05: конфлікт частин «Під вербою» тепер має окремий kind.
-    "conflict_both": {"answer", "variants", "conflict"},
+    # Бриф 05: конфлікт частин «Під вербою» — лише відповідь по частинах; звичайна
+    # відповідь тут означає, що шлях по частинах не спрацював.
+    "conflict_both": {"conflict"},
     # Питання поза gold-набором (--extra): очікуваного kind немає.
     "extra": set(),
     "variants_by_part": {"variants"},

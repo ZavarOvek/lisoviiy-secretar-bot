@@ -202,3 +202,27 @@ async def test_subscribe_and_unsubscribe_report_the_previous_state(world):
     assert await notifier.subscribe(100) is False
     assert await notifier.unsubscribe(100) is True
     assert await notifier.unsubscribe(100) is False
+
+
+async def test_failed_unsubscribe_does_not_stop_the_broadcast(world, monkeypatch, caplog):
+    bot, _, notifier, uploads, hedgehog, _ = world
+    bot.errors[OWL] = [TelegramForbiddenError(SendMessage(chat_id=OWL, text="x"), "blocked")]
+
+    async def broken(self, chat_id):
+        raise RuntimeError("database is down")
+
+    monkeypatch.setattr(Notifier, "unsubscribe", broken)
+    await _new_advice(uploads, hedgehog)
+    await notifier.drain()
+    assert [chat for chat, _ in bot.sent] == [FOX]
+    assert f"chat {OWL}: unsubscribe failed: RuntimeError" in caplog.text
+
+
+async def test_drain_with_timeout_cancels_and_logs(world, caplog):
+    bot, _, notifier, uploads, hedgehog, _ = world
+    bot.gate = asyncio.Event()
+    await _new_advice(uploads, hedgehog)
+    with caplog.at_level(logging.WARNING):
+        await notifier.drain(timeout=0.05)
+    assert "notification task was cancelled" in caplog.text
+    assert bot.sent == []

@@ -173,3 +173,11 @@ def test_archive_classify_still_skips_the_first_line():
     # Архівний classify не змінювався: однорядковий вступ без заголовка він не бачить.
     one_line = "Для звірів, що живуть у хвойному лісі. Гриби збирайте після дощу."
     assert classify("порада", one_line, GLOVES) is None
+
+
+def test_exclamation_first_line_does_not_use_up_the_intro_window():
+    text = (
+        "Увага!\nГриби цього року пізні. Їх мало. Для звірів хвойного лісу — збирайте після дощу."
+    )
+    result = classify_upload("порада", text, GLOVES)
+    assert (result.kind, result.scope) == (DocumentKind.PART, "khvoinyi")

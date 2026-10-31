@@ -21,6 +21,8 @@ from lisovyi.uploads.service import UploadService
 
 log = logging.getLogger("lisovyi")
 
+NOTIFY_DRAIN_TIMEOUT = 10.0
+
 
 def make_llm(settings: Settings) -> LLMClient:
     # Повтори SDK вимкнені: 429 обробляє LLMClient, щоб звір бачив, що відбувається.
@@ -81,14 +83,18 @@ async def run(settings: Settings, db_url: str) -> None:
         dispatcher.include_router(uploads_router)
         dispatcher.include_router(library_router)
         dispatcher.include_router(router)
-        await dispatcher.start_polling(
-            bot,
-            search=search,
-            answers=answers,
-            uploads=uploads,
-            library=Library(sessionmaker),
-            notifier=notifier,
-        )
+        try:
+            await dispatcher.start_polling(
+                bot,
+                search=search,
+                answers=answers,
+                uploads=uploads,
+                library=Library(sessionmaker),
+                notifier=notifier,
+            )
+        finally:
+            # Розсилка, почата перед зупинкою, має дійти до кінця, поки БД ще відкрита.
+            await notifier.drain(timeout=NOTIFY_DRAIN_TIMEOUT)
     finally:
         await engine.dispose()
 
