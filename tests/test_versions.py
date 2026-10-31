@@ -128,3 +128,18 @@ def test_rank_in_scope_excludes_and_orders(archive_search):
     assert first not in {
         s.document.document_id for s in rank_in_scope("гриби", "khvoinyi", index, [first])
     }
+
+
+def test_runner_up_with_zero_score_needs_shared_rare_lemmas():
+    filler = [_doc(i, "Під ялиною", f"шишки хвоя мох {i}") for i in range(3, 40)]
+    first = _doc(1, "Під дубом", "Жолуді під старим дубом збирають після першого морозу.")
+    second = _doc(2, "Під дубом", "Синиці прилітають до годівниці взимку.")
+    index = Bm25Index.build([first, second, *filler])
+    # Одне спільне слово з першим документом і жодного з другим — це не нова версія.
+    assert _candidate("Морозу не боїмося, співаємо пісні.", "Під дубом", index) is None
+    assert (
+        _candidate(
+            "Жолуді під дубом збирай після першого морозу.", "Під дубом", index
+        ).document.document_id
+        == 1
+    )

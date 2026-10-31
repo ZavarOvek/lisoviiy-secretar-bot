@@ -52,14 +52,14 @@ class RecordingSession(BaseSession):
 class NoUploads:
     """Заглушка діалогу завантажень для тестів, що його не стосуються."""
 
-    def awaiting_name(self, chat_id: int) -> bool:
+    def awaiting_name(self, chat_id: int, telegram_id: int | None = None) -> bool:
         return False
 
 
-def message_update(text: str) -> Update:
+def message_update(text: str, user: User = USER) -> Update:
     return Update(
         update_id=1,
-        message=Message(message_id=1, date=datetime.now(UTC), chat=CHAT, from_user=USER, text=text),
+        message=Message(message_id=1, date=datetime.now(UTC), chat=CHAT, from_user=user, text=text),
     )
 
 

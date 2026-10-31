@@ -1,5 +1,7 @@
+import io
 import time
 
+import pypdf
 import pytest
 
 from lisovyi.domain import TextSource
@@ -73,3 +75,12 @@ async def test_reading_runs_off_the_event_loop_thread():
 
     await read_upload(b"x", "a.txt", extract=extract)
     assert threads[0] is not threading.main_thread()
+
+
+async def test_pdf_with_too_many_pages_is_too_long():
+    writer = pypdf.PdfWriter()
+    for _ in range(11):
+        writer.add_blank_page(width=100, height=100)
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    assert await _rejected(buffer.getvalue(), "скан.pdf") == TOO_LONG

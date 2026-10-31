@@ -55,7 +55,7 @@ async def start(message: Message, search: SearchService) -> None:
 
 @router.message(F.text & ~F.text.startswith("/"))
 async def question(message: Message, bot: Bot, answers: AnswerService) -> None:
-    await _answer(bot, message.chat.id, message.text or "", answers)
+    await answer_question(bot, message.chat.id, message.text or "", answers)
 
 
 @router.callback_query(F.data.startswith(PLACE_PREFIX))
@@ -71,10 +71,10 @@ async def place_chosen(callback: CallbackQuery, bot: Bot, answers: AnswerService
         await bot.send_message(chat_id, texts.PLACE_GONE, parse_mode=None)
         return
     # Натиск кнопки — те саме, що звір написав назву рукавички.
-    await _answer(bot, chat_id, place.label, answers)
+    await answer_question(bot, chat_id, place.label, answers)
 
 
-async def _answer(bot: Bot, chat_id: int, text: str, answers: AnswerService) -> None:
+async def answer_question(bot: Bot, chat_id: int, text: str, answers: AnswerService) -> None:
     async def notify(intermediate: str) -> None:
         await bot.send_message(chat_id, intermediate, parse_mode=None)
 

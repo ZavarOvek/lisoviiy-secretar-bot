@@ -10,6 +10,7 @@
 """
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -103,8 +104,9 @@ async def main() -> None:
             topic_from_rules=place.topic_from_rules,
         )  # fmt: skip
         check(candidate is not None and candidate.document.filename == OLD, f"candidate is {OLD}")
+        sha256 = hashlib.sha256(data).hexdigest()
         saved = await uploads.save(
-            beast, extracted, data, FIXTURE.stem, FIXTURE.name, place.scope, place.kind,
+            beast, extracted, sha256, FIXTURE.stem, FIXTURE.name, place.scope, place.kind,
             place.topic, candidate.document.document_id,
         )  # fmt: skip
         print(f"saved: {saved}")

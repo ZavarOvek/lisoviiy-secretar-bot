@@ -47,16 +47,23 @@ def find_version_candidate(
     if not ranked:
         return None
     best = ranked[0]
-    if len(ranked) == 1:
-        shared = bag(new_text).keys() & bag(_indexed_text(best.document)).keys()
-        rare = [lemma for lemma in shared if index.document_frequency(lemma) <= RARE_DF]
-        if best.score > 0 and len(rare) >= MIN_SHARED_RARE:
+    if best.score <= 0:
+        return None
+    second = ranked[1].score if len(ranked) > 1 else 0.0
+    if second == 0:
+        # Відношення немає (документ у місці один або решта не схожі зовсім): тоді
+        # потрібні спільні рідкісні леми, інакше одне спільне слово дало б «нову версію».
+        if _shared_rare(new_text, best.document, index) >= MIN_SHARED_RARE:
             return Candidate(best.document, "similarity")
         return None
-    second = ranked[1].score
-    if best.score > 0 and (second == 0 or best.score / second >= VERSION_RATIO):
+    if best.score / second >= VERSION_RATIO:
         return Candidate(best.document, "similarity")
     return None
+
+
+def _shared_rare(new_text: str, document: SearchDocument, index: Bm25Index) -> int:
+    shared = bag(new_text).keys() & bag(_indexed_text(document)).keys()
+    return sum(index.document_frequency(lemma) <= RARE_DF for lemma in shared)
 
 
 def rank_in_scope(

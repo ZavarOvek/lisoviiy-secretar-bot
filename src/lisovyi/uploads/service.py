@@ -1,6 +1,5 @@
 """Звірі й їхні поради в БД: реєстрація, збереження з заміною, переприв'язка версії."""
 
-import hashlib
 import logging
 import re
 import unicodedata
@@ -106,7 +105,7 @@ class UploadService:
         self,
         beast: BeastInfo,
         extracted: Extracted,
-        data: bytes,
+        sha256: str,
         title: str,
         filename: str,
         scope: str,
@@ -121,7 +120,45 @@ class UploadService:
         `replaces` — id документа, який звір замінює (будь-який активний, архівний чи чужий).
         Новий переймає його тему й отримує replaces_id, старий стає replaced. Без заміни тема
         запропонована; якщо в цьому місці вона вже зайнята, додається суфікс _2, _3, …
+        Якщо вільну тему паралельно зайняла інша окрема порада, вибір теми повторюється раз.
         """
+        try:
+            saved = await self._save_once(
+                beast, extracted, sha256, title, filename, scope, kind, topic, replaces,
+                ocr_confirmed,
+            )  # fmt: skip
+        except ConflictError:
+            if replaces is not None:
+                raise
+            saved = await self._save_once(
+                beast, extracted, sha256, title, filename, scope, kind, topic, None,
+                ocr_confirmed,
+            )  # fmt: skip
+        log.info(
+            "beast %d saved %r as %s/%s topic=%s replaces=%s",
+            beast.telegram_id,
+            filename,
+            kind,
+            scope,
+            saved.topic,
+            replaces,
+        )
+        await self.search.reload()
+        return saved
+
+    async def _save_once(
+        self,
+        beast: BeastInfo,
+        extracted: Extracted,
+        sha256: str,
+        title: str,
+        filename: str,
+        scope: str,
+        kind: DocumentKind,
+        topic: str,
+        replaces: int | None,
+        ocr_confirmed: bool,
+    ) -> SavedDocument:
         async with self._sessionmaker() as session:
             try:
                 async with session.begin():
@@ -143,7 +180,7 @@ class UploadService:
                         topic=topic,
                         text=extracted.text,
                         text_source=extracted.source,
-                        sha256=hashlib.sha256(data).hexdigest(),
+                        sha256=sha256,
                         ocr_confirmed=_ocr_confirmed(extracted, ocr_confirmed),
                         author_id=beast.id,
                         status=DocumentStatus.ACTIVE,
@@ -157,16 +194,6 @@ class UploadService:
                 raise ConflictError(
                     f"scope {scope!r}, topic {topic!r} was taken meanwhile"
                 ) from exc
-        log.info(
-            "beast %d saved %r as %s/%s topic=%s replaces=%s",
-            beast.telegram_id,
-            filename,
-            kind,
-            scope,
-            topic,
-            replaces,
-        )
-        await self.search.reload()
         return saved
 
     async def rebind(self, document_id: int, target_id: int) -> SavedDocument:
@@ -207,7 +234,7 @@ class UploadService:
         self,
         beast: BeastInfo,
         extracted: Extracted,
-        data: bytes,
+        sha256: str,
         filename: str,
         forest_map: dict[str, tuple[ForestPart, ...]],
         *,
@@ -241,7 +268,7 @@ class UploadService:
                         topic=MAP_TOPIC,
                         text=extracted.text,
                         text_source=extracted.source,
-                        sha256=hashlib.sha256(data).hexdigest(),
+                        sha256=sha256,
                         ocr_confirmed=_ocr_confirmed(extracted, ocr_confirmed),
                         author_id=beast.id,
                         status=DocumentStatus.ACTIVE,

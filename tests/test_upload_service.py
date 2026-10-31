@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 
 import pytest
 from sqlalchemy import select
@@ -45,6 +46,10 @@ async def uploads(sessionmaker):
     return UploadService(sessionmaker, search)
 
 
+def _sha(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
 def _text(text: str, source: TextSource = TextSource.TEXT) -> Extracted:
     return Extracted(text, source)
 
@@ -76,7 +81,7 @@ async def test_beast_replaces_an_archive_document(uploads, sessionmaker):
     saved = await uploads.save(
         beast,
         _text("Гриби\nМаслюки ростуть під молодими соснами після дощу."),
-        b"new version",
+        _sha(b"new version"),
         "гриби_нова_версія",
         "гриби_нова_версія.docx",
         "khvoinyi",
@@ -106,8 +111,8 @@ async def test_beast_replaces_an_archive_document(uploads, sessionmaker):
 async def test_separate_advice_on_a_taken_topic_gets_a_suffix(uploads, sessionmaker):
     beast = await uploads.register(7, "Їжак")
     kwargs = {"scope": "khvoinyi", "kind": DocumentKind.PART, "topic": "hryby", "replaces": None}
-    first = await uploads.save(beast, _text("Опеньки."), b"1", "a", "a.txt", **kwargs)
-    second = await uploads.save(beast, _text("Рижики."), b"2", "b", "b.txt", **kwargs)
+    first = await uploads.save(beast, _text("Опеньки."), _sha(b"1"), "a", "a.txt", **kwargs)
+    second = await uploads.save(beast, _text("Рижики."), _sha(b"2"), "b", "b.txt", **kwargs)
 
     assert (first.topic, second.topic) == ("hryby_2", "hryby_3")
     async with sessionmaker() as session:
@@ -129,7 +134,7 @@ async def test_parallel_replacement_of_the_same_document(uploads, sessionmaker):
 
     def replace(beast, name):
         return uploads.save(
-            beast, _text("Гриби."), name.encode(), name, f"{name}.txt", "khvoinyi",
+            beast, _text("Гриби."), _sha(name.encode()), name, f"{name}.txt", "khvoinyi",
             DocumentKind.PART, "hryby", old.id,
         )  # fmt: skip
 
@@ -144,16 +149,16 @@ async def test_replacing_an_already_replaced_document_is_a_conflict(uploads, ses
     beast = await uploads.register(7, "Їжак")
     [old] = await _by_filename(sessionmaker, GUIDE)
     args = ("khvoinyi", DocumentKind.PART, "hryby", old.id)
-    await uploads.save(beast, _text("Гриби."), b"1", "a", "a.txt", *args)
+    await uploads.save(beast, _text("Гриби."), _sha(b"1"), "a", "a.txt", *args)
     with pytest.raises(ConflictError):
-        await uploads.save(beast, _text("Гриби."), b"2", "b", "b.txt", *args)
+        await uploads.save(beast, _text("Гриби."), _sha(b"2"), "b", "b.txt", *args)
 
 
 @pytest.mark.db
 async def test_rebind_makes_the_new_advice_a_version_of_another(uploads, sessionmaker):
     beast = await uploads.register(7, "Їжак")
     saved = await uploads.save(
-        beast, _text("Опеньки ростуть на пнях."), b"1", "опеньки", "опеньки.txt",
+        beast, _text("Опеньки ростуть на пнях."), _sha(b"1"), "опеньки", "опеньки.txt",
         "khvoinyi", DocumentKind.PART, "openky", None,
     )  # fmt: skip
     [old] = await _by_filename(sessionmaker, GUIDE)
@@ -172,7 +177,15 @@ async def test_rebind_makes_the_new_advice_a_version_of_another(uploads, session
 async def test_rebind_across_places_is_refused(uploads, sessionmaker):
     beast = await uploads.register(7, "Їжак")
     saved = await uploads.save(
-        beast, _text("Порада."), b"1", "п", "п.txt", "Під дубом", DocumentKind.GLOVE, "p", None
+        beast,
+        _text("Порада."),
+        _sha(b"1"),
+        "п",
+        "п.txt",
+        "Під дубом",
+        DocumentKind.GLOVE,
+        "p",
+        None,
     )
     [old] = await _by_filename(sessionmaker, GUIDE)
     with pytest.raises(ValueError, match="different places"):
@@ -186,10 +199,10 @@ async def test_ocr_confirmation_is_stored(uploads, sessionmaker):
     beast = await uploads.register(7, "Їжак")
     common = ("Під дубом", DocumentKind.GLOVE, "p", None)
     await uploads.save(
-        beast, _text("300 кроків.", TextSource.OCR), b"1", "a", "a.pdf", *common,
+        beast, _text("300 кроків.", TextSource.OCR), _sha(b"1"), "a", "a.pdf", *common,
         ocr_confirmed=True,
     )  # fmt: skip
-    await uploads.save(beast, _text("3 шишки.", TextSource.OCR), b"2", "b", "b.pdf", *common)
+    await uploads.save(beast, _text("3 шишки.", TextSource.OCR), _sha(b"2"), "b", "b.pdf", *common)
     [a] = await _by_filename(sessionmaker, "a.pdf")
     [b] = await _by_filename(sessionmaker, "b.pdf")
     assert (a.ocr_confirmed, b.ocr_confirmed) == (True, False)
@@ -206,7 +219,7 @@ async def test_map_replacement(uploads, sessionmaker, archive_map_text):
     [old] = await _by_filename(sessionmaker, "Карта лісу.pdf")
 
     orphans = await uploads.replace_map(
-        beast, _text(text), text.encode(), "Карта лісу.txt", forest_map
+        beast, _text(text), _sha(text.encode()), "Карта лісу.txt", forest_map
     )
 
     assert orphans == []
@@ -241,7 +254,7 @@ async def test_gloves_missing_from_the_new_map_keep_their_documents(
 
     with caplog.at_level("WARNING"):
         orphans = await uploads.replace_map(
-            beast, _text(text), text.encode(), "Карта лісу.txt", forest_map
+            beast, _text(text), _sha(text.encode()), "Карта лісу.txt", forest_map
         )
 
     assert orphans == ["У соснах"]

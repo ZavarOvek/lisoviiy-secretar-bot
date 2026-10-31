@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import hashlib
 import logging
 import secrets
 import time
@@ -17,6 +18,7 @@ from pathlib import PurePath
 
 from aiogram import Bot, F, Router
 from aiogram.enums import ChatAction
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject, Filter
 from aiogram.types import (
     CallbackQuery,
@@ -26,13 +28,15 @@ from aiogram.types import (
 )
 from aiogram.utils.chat_action import ChatActionSender
 
+from lisovyi.answer.service import AnswerService
 from lisovyi.bot import texts
+from lisovyi.bot.handlers import answer_question
 from lisovyi.bot.places import all_places, find_place, human_place, place_keyboard
 from lisovyi.domain import PART_NAMES, DocumentKind, ForestPart, TextSource
 from lisovyi.ingest.classify import UploadClassification, classify_upload, upload_topic
 from lisovyi.ingest.forest_map import MapParseError, parse_forest_map
 from lisovyi.ingest.parsers import Extracted
-from lisovyi.uploads.reading import UploadRejected, read_upload
+from lisovyi.uploads.reading import UNREADABLE, UploadRejected, read_upload
 from lisovyi.uploads.service import (
     BeastInfo,
     ConflictError,
@@ -63,6 +67,9 @@ Download = Callable[[Bot, str], Awaitable[bytes]]
 
 
 class Stage(StrEnum):
+    # Бот завантажує й читає файл: текст звіра в цей час — питання, як завжди.
+    READING = "reading"
+    # Бот попросив ім'я: наступний текст цього звіра — ім'я (єдиний виняток з вимоги 3).
     NAME = "name"
     OCR = "ocr"
     PLACE = "place"
@@ -83,7 +90,8 @@ class PendingUpload:
     started: float
     stage: Stage
     beast: BeastInfo | None = None
-    data: bytes = b""
+    # Сам файл не зберігається: лише його sha256 для БД.
+    sha256: str = ""
     extracted: Extracted | None = None
     ocr_confirmed: bool = False
     place: UploadClassification | None = None
@@ -117,7 +125,13 @@ class UploadDialogue:
         self._clock = clock
         self._download = download
         self._read = read
+        # Незавершене завантаження чату: новий файл його скасовує.
         self._pending: dict[int, PendingUpload] = {}
+        # Записані окремі поради чату, під якими ще живе «Це нова версія іншої поради?».
+        self._saved: dict[int, dict[str, PendingUpload]] = {}
+        # Токени завантажень, які вже завершилися: повторний натиск їхніх кнопок
+        # (подвійний клік на повільному зв'язку) просто ігнорується.
+        self._finished: dict[str, float] = {}
         # Повідомлення й кнопки одного чату обробляються по черзі.
         self._locks: weakref.WeakValueDictionary[int, asyncio.Lock] = weakref.WeakValueDictionary()
 
@@ -125,15 +139,30 @@ class UploadDialogue:
         return self._locks.setdefault(chat_id, asyncio.Lock())
 
     def live(self, chat_id: int) -> PendingUpload | None:
-        pending = self._pending.get(chat_id)
-        if pending is not None and self._clock() - pending.started > self.ttl:
-            del self._pending[chat_id]
-            return None
-        return pending
+        self._sweep()
+        return self._pending.get(chat_id)
 
-    def awaiting_name(self, chat_id: int) -> bool:
+    def awaiting_name(self, chat_id: int, telegram_id: int | None = None) -> bool:
         pending = self.live(chat_id)
-        return pending is not None and pending.stage == Stage.NAME
+        return (
+            pending is not None
+            and pending.stage == Stage.NAME
+            and (telegram_id is None or pending.telegram_id == telegram_id)
+        )
+
+    def _sweep(self) -> None:
+        """Забуває все, що старше TTL, у всіх чатах: інакше покинуті завантаження жили б
+        до кінця процесу."""
+        now = self._clock()
+        for chat_id in [c for c, p in self._pending.items() if now - p.started > self.ttl]:
+            del self._pending[chat_id]
+        for chat_id, saved in list(self._saved.items()):
+            for token in [t for t, p in saved.items() if now - p.started > self.ttl]:
+                del saved[token]
+            if not saved:
+                del self._saved[chat_id]
+        for token in [t for t, at in self._finished.items() if now - at > self.ttl]:
+            del self._finished[token]
 
     # --- вхідні події
 
@@ -153,8 +182,7 @@ class UploadDialogue:
             await _send(bot, chat_id, texts.TOO_BIG)
             return
 
-        previous = self.live(chat_id)
-        if previous is not None and previous.stage != Stage.SAVED:
+        if self.live(chat_id) is not None:
             await _send(bot, chat_id, texts.PREVIOUS_SHELVED)
         pending = PendingUpload(
             token=secrets.token_hex(4),
@@ -164,28 +192,34 @@ class UploadDialogue:
             filename=filename,
             title=PurePath(filename).stem,
             started=self._clock(),
-            stage=Stage.NAME,
+            stage=Stage.READING,
         )
         self._pending[chat_id] = pending
         pending.beast = await self.service.beast(pending.telegram_id)
         if pending.beast is None:
+            pending.stage = Stage.NAME
             await _send(
                 bot, chat_id, texts.ASK_NAME, _keyboard(pending, [(texts.CANCEL, "cancel")])
             )
             return
         await self._read_file(bot, pending)
 
-    async def on_name(self, bot: Bot, message: Message) -> None:
-        pending = self.live(message.chat.id)
-        if pending is None or pending.stage != Stage.NAME:
-            return
+    async def on_name(self, bot: Bot, message: Message) -> bool:
+        """Текст як ім'я. False — бот уже не чекає імені від цього звіра (крок змінився,
+        поки повідомлення стояло в черзі), і текст треба обробити як питання."""
+        sender = message.from_user.id if message.from_user else None
+        if not self.awaiting_name(message.chat.id, sender):
+            return False
+        pending = self._pending[message.chat.id]
         name = valid_name(message.text or "")
         if name is None:
             await _send(bot, pending.chat_id, texts.BAD_NAME)
-            return
+            return True
+        pending.stage = Stage.READING
         pending.beast = await self.service.register(pending.telegram_id, name)
         await _send(bot, pending.chat_id, texts.NICE_TO_MEET.format(name=name))
         await self._read_file(bot, pending)
+        return True
 
     async def on_callback(self, bot: Bot, callback: CallbackQuery) -> None:
         await callback.answer()
@@ -195,18 +229,23 @@ class UploadDialogue:
         parts = (callback.data or "").split(":", 3)
         _, token, action, argument = parts + [""] * (4 - len(parts))
         pending = self.live(chat_id)
-        if pending is None or pending.token != token or not _expected(pending.stage, action):
+        if pending is None or pending.token != token:
+            pending = self._saved.get(chat_id, {}).get(token)
+        if pending is None and token in self._finished:
+            log.info("button of a finished upload pressed again: %r", callback.data)
+            return
+        if pending is None or not _expected(pending.stage, action):
             log.info("stale upload callback %r in chat %d", callback.data, chat_id)
             await _send(bot, chat_id, texts.STALE)
             return
         if action == "cancel":
-            self._drop(pending)
+            self._finish(pending)
             await _send(bot, chat_id, texts.CANCELLED)
         elif action == "ocr_yes":
             pending.ocr_confirmed = True
             await self._choose_place(bot, pending)
         elif action == "ocr_no":
-            self._drop(pending)
+            self._finish(pending)
             await _send(bot, chat_id, texts.OCR_REJECTED)
         elif action == "place":
             await self._place_chosen(bot, pending, argument)
@@ -224,16 +263,34 @@ class UploadDialogue:
     # --- кроки
 
     async def _read_file(self, bot: Bot, pending: PendingUpload) -> None:
+        pending.stage = Stage.READING
         await bot.send_chat_action(pending.chat_id, ChatAction.UPLOAD_DOCUMENT)
         try:
             async with ChatActionSender.upload_document(
                 chat_id=pending.chat_id, bot=bot, initial_sleep=TYPING_REPEAT
             ):
-                pending.data = await self._download(bot, pending.file_id)
-                pending.extracted = await self._read(pending.data, pending.filename)
+                data = await self._download(bot, pending.file_id)
+                pending.sha256 = hashlib.sha256(data).hexdigest()
+                pending.extracted = await self._read(data, pending.filename)
         except UploadRejected as rejected:
             self._drop(pending)
             await _send(bot, pending.chat_id, texts.READ_REJECTED[rejected.reason])
+            return
+        except TelegramBadRequest as exc:
+            # Без file_size у повідомленні межу 20 МБ перевіряє вже сам Telegram.
+            self._drop(pending)
+            log.info("download of %r refused: %s", pending.filename, exc.message)
+            too_big = "too big" in exc.message.lower()
+            await _send(
+                bot, pending.chat_id, texts.TOO_BIG if too_big else texts.READ_REJECTED[UNREADABLE]
+            )
+            return
+        except Exception:
+            # Будь-яка інша помилка (мережа, OCR) не має лишити завантаження висіти:
+            # інакше наступний текст звіра став би його «ім'ям».
+            self._drop(pending)
+            log.exception("reading upload %r failed", pending.filename)
+            await _send(bot, pending.chat_id, texts.READ_REJECTED[UNREADABLE])
             return
         extracted = pending.extracted
         if extracted.source == TextSource.OCR and extracted.review_items:
@@ -265,7 +322,9 @@ class UploadDialogue:
         place = find_place(key, all_places(self.service.search.state.resolver.gloves))
         if place is None:
             log.warning("upload place button for a place no longer on the map: %r", key)
-            await _send(bot, pending.chat_id, texts.PLACE_GONE)
+            gloves = self.service.search.state.resolver.gloves
+            keyboard = place_keyboard(all_places(gloves), prefix=_callback(pending, "place:"))
+            await _send(bot, pending.chat_id, texts.UPLOAD_PLACE_GONE, keyboard)
             return
         topic, from_rules = upload_topic(pending.title)
         pending.place = UploadClassification(place.kind, place.scope, topic, from_rules)
@@ -302,7 +361,7 @@ class UploadDialogue:
             saved = await self.service.save(
                 pending.beast,
                 pending.extracted,
-                pending.data,
+                pending.sha256,
                 pending.title,
                 pending.filename,
                 place.scope,
@@ -316,11 +375,14 @@ class UploadDialogue:
             await _send(bot, pending.chat_id, texts.CONFLICT)
             return
         if saved.replaced_title is not None:
-            self._drop(pending)
+            self._finish(pending)
             await _send(bot, pending.chat_id, _replaced_text(pending.beast, saved))
             return
         pending.stage = Stage.SAVED
         pending.saved = saved
+        # Записана порада більше не «незавершена»: новий файл її кнопку не скасовує.
+        self._drop(pending)
+        self._saved.setdefault(pending.chat_id, {})[pending.token] = pending
         text = texts.SAVED_NEW.format(
             name=pending.beast.name,
             title=saved.title,
@@ -361,7 +423,7 @@ class UploadDialogue:
             self._drop(pending)
             await _send(bot, pending.chat_id, texts.CONFLICT)
             return
-        self._drop(pending)
+        self._finish(pending)
         await _send(bot, pending.chat_id, _replaced_text(pending.beast, saved))
 
     async def _preview_map(self, bot: Bot, pending: PendingUpload) -> None:
@@ -391,7 +453,7 @@ class UploadDialogue:
             await self.service.replace_map(
                 pending.beast,
                 pending.extracted,
-                pending.data,
+                pending.sha256,
                 pending.filename,
                 pending.forest_map,
                 ocr_confirmed=pending.ocr_confirmed,
@@ -400,18 +462,24 @@ class UploadDialogue:
             self._drop(pending)
             await _send(bot, pending.chat_id, texts.CONFLICT)
             return
-        self._drop(pending)
+        self._finish(pending)
         await _send(bot, pending.chat_id, texts.MAP_REPLACED)
 
     def _drop(self, pending: PendingUpload) -> None:
         if self._pending.get(pending.chat_id) is pending:
             del self._pending[pending.chat_id]
+        self._saved.get(pending.chat_id, {}).pop(pending.token, None)
+
+    def _finish(self, pending: PendingUpload) -> None:
+        self._drop(pending)
+        self._finished[pending.token] = self._clock()
 
 
 # --- кнопки й тексти
 
 # Яка дія має сенс на якому кроці: кнопка зі старого кроку того самого файлу — теж протухла.
-_ACTIONS = {
+_ACTIONS: dict[Stage, set[str]] = {
+    Stage.READING: set(),
     Stage.NAME: {"cancel"},
     Stage.OCR: {"ocr_yes", "ocr_no"},
     Stage.PLACE: {"place"},
@@ -511,7 +579,8 @@ class AwaitingName(Filter):
     """Текст — це ім'я лише тоді, коли бот саме його попросив (вимога 12)."""
 
     async def __call__(self, message: Message, uploads: UploadDialogue) -> bool:
-        return uploads.awaiting_name(message.chat.id)
+        sender = message.from_user.id if message.from_user else None
+        return uploads.awaiting_name(message.chat.id, sender)
 
 
 @uploads_router.message(Command("name"))
@@ -548,9 +617,15 @@ async def photo_sent(message: Message, bot: Bot) -> None:
 
 
 @uploads_router.message(F.text & ~F.text.startswith("/"), AwaitingName())
-async def name_sent(message: Message, bot: Bot, uploads: UploadDialogue) -> None:
+async def name_sent(
+    message: Message, bot: Bot, uploads: UploadDialogue, answers: AnswerService
+) -> None:
     async with uploads.lock(message.chat.id):
-        await uploads.on_name(bot, message)
+        taken = await uploads.on_name(bot, message)
+    if not taken:
+        # Фільтр бачив крок «ім'я», але поки повідомлення чекало замка, крок змінився:
+        # тоді це звичайне питання.
+        await answer_question(bot, message.chat.id, message.text or "", answers)
 
 
 @uploads_router.callback_query(F.data.startswith(CALLBACK_PREFIX))

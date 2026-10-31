@@ -1,10 +1,13 @@
 """Діалог завантаження порад через справжній Dispatcher і справжню БД."""
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
 from aiogram import Bot
-from aiogram.methods import SendChatAction, SendMessage
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.methods import GetFile, SendChatAction, SendMessage
+from aiogram.types import User
 from sqlalchemy import select
 from telegram_fakes import (
     DISPATCHER,
@@ -23,6 +26,7 @@ from lisovyi.bot.uploads import UploadDialogue
 from lisovyi.config import PROJECT_ROOT
 from lisovyi.db.models import Beast, Document
 from lisovyi.domain import DocumentStatus, TextSource
+from lisovyi.ingest.forest_map import parse_forest_map
 from lisovyi.ingest.importer import import_archive
 from lisovyi.ingest.ocr import find_review_items
 from lisovyi.ingest.parsers import Extracted
@@ -381,7 +385,7 @@ async def test_replacement_conflict(world):
     [old] = await documents(world, filename="Грибний путівник хвойного лісу.pdf")
     owl = await world.dialogue.service.register(99, "Сова")
     await world.dialogue.service.save(
-        owl, Extracted("Гриби.", TextSource.TEXT), b"owl", "сова", "сова.txt",
+        owl, Extracted("Гриби.", TextSource.TEXT), "0" * 64, "сова", "сова.txt",
         "khvoinyi", old.kind, "hryby", old.id,
     )  # fmt: skip
     await press(world, texts.REPLACE)
@@ -535,3 +539,111 @@ async def test_name_cannot_register_a_new_beast(world):
 
 def test_name_is_in_the_bot_commands():
     assert [(c.command, c.description) for c in COMMANDS][-1] == ("name", "Змінити своє ім'я")
+
+
+# --- рев'ю брифу 04: читання, чужий текст, записані поради, подвійні натиски
+
+
+async def test_text_sent_while_the_file_is_read_is_a_question(world):
+    await registered(world)
+    release = asyncio.Event()
+
+    async def slow_read(data, filename):
+        await release.wait()
+        return Extracted(VERBA_ADVICE, TextSource.TEXT)
+
+    world.dialogue._read = slow_read
+    upload = asyncio.create_task(send_file(world, "порада.txt", b"x"))
+    await asyncio.sleep(0.05)
+    await feed(world, message_update("Які гриби біля сосон?"))
+    assert world.questions.calls == ["Які гриби біля сосон?"]
+    release.set()
+    await upload
+    assert last_text(world).startswith("Дякую, Їжак Колючий! Записав пораду")
+
+
+async def test_failed_download_ends_the_upload_and_keeps_the_name(world):
+    await registered(world)
+
+    async def broken_download(bot, file_id):
+        raise ConnectionError("network is down")
+
+    world.dialogue._download = broken_download
+    await send_file(world, "порада.txt", b"x")
+    assert last_text(world) == texts.READ_REJECTED["unreadable"]
+    assert world.dialogue.live(42) is None
+    # Наступний текст — питання, а не нове ім'я звіра.
+    await feed(world, message_update("Коли збирати жолуді"))
+    assert world.questions.calls == ["Коли збирати жолуді"]
+    assert (await world.dialogue.service.beast(42)).name == "Їжак Колючий"
+
+
+async def test_file_refused_by_telegram_as_too_big(world):
+    await registered(world)
+
+    async def refused(bot, file_id):
+        raise TelegramBadRequest(GetFile(file_id=file_id), "Bad Request: file is too big")
+
+    world.dialogue._download = refused
+    await send_file(world, "порада.pdf", b"x", file_size=None)
+    assert last_text(world) == texts.TOO_BIG
+
+
+async def test_text_of_another_member_is_not_the_name(world):
+    await send_file(world, "порада.txt", VERBA_ADVICE.encode())
+    owl = User(id=99, is_bot=False, first_name="Сова")
+    await feed(world, message_update("Сова Мудра", user=owl))
+    assert world.questions.calls == ["Сова Мудра"]
+    assert world.dialogue.awaiting_name(42)
+
+
+async def test_button_under_saved_advice_survives_a_new_file(world):
+    await registered(world)
+    await send_file(world, "порада.txt", VERBA_ADVICE.encode(), file_id="a")
+    saved_message = world.session.sent(SendMessage)[-1]
+    await send_file(world, "без_місця.txt", NO_PLACE.encode(), file_id="b")
+    assert texts.PREVIOUS_SHELVED not in world.session.texts()
+
+    await feed(
+        world, callback_update(saved_message.reply_markup.inline_keyboard[0][0].callback_data)
+    )
+    assert last_text(world) == texts.PICK_OTHER
+
+
+async def test_second_tap_on_a_finished_upload_is_ignored(world):
+    await registered(world)
+    await send_file(world, "гриби_нова_версія.txt", MUSHROOMS.encode())
+    await press(world, texts.REPLACE)
+    sent = len(world.session.texts())
+    await press(world, texts.REPLACE)
+    assert len(world.session.texts()) == sent
+
+
+async def test_upload_place_removed_from_the_map_offers_fresh_buttons(world, archive_map_text):
+    await registered(world)
+    await send_file(world, "без_місця.txt", NO_PLACE.encode())
+    old_keyboard = world.session.sent(SendMessage)[-1].reply_markup
+    [edge] = [b for row in old_keyboard.inline_keyboard for b in row if b.text == "На узліссі"]
+
+    # Поки звір вибирає, інший звір прибирає «На узліссі» з карти.
+    lines = archive_map_text.splitlines()
+    text = "\n".join(line for line in lines if not line.startswith("На узліссі —"))
+    owl = await world.dialogue.service.register(99, "Сова")
+    await world.dialogue.service.replace_map(
+        owl, Extracted(text, TextSource.TEXT), "1" * 64, "Карта лісу.txt", parse_forest_map(text)
+    )
+    await feed(world, callback_update(edge.callback_data))
+
+    message = world.session.sent(SendMessage)[-1]
+    assert message.text == texts.UPLOAD_PLACE_GONE
+    labels = [b.text for row in message.reply_markup.inline_keyboard for b in row]
+    assert "На узліссі" not in labels and "Увесь ліс" in labels
+    await press(world, "Увесь ліс")
+    assert "усього лісу" in last_text(world)
+
+
+async def test_expired_uploads_of_other_chats_are_forgotten(world):
+    await send_file(world, "порада.txt", VERBA_ADVICE.encode())
+    world.clock.now += 30 * 60 + 1
+    world.dialogue.live(7)
+    assert world.dialogue._pending == {}
