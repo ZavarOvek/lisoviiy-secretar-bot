@@ -15,6 +15,8 @@ from telegram_fakes import (
 )
 
 from lisovyi.bot import texts
+from lisovyi.bot.groups import GROUP_COMMANDS, groups_router
+from lisovyi.bot.private import private_router
 
 GROUP = Chat(id=-100, type="group", title="Лісова рада")
 SUPERGROUP = Chat(id=-1001, type="supergroup", title="Усі рукавички")
@@ -98,3 +100,28 @@ async def test_channel_posts_are_ignored(session):
     channel = Chat(id=-1002, type="channel", title="Лісові новини")
     post = Message(message_id=5, date=datetime.now(UTC), chat=channel, text="/start")
     assert await feed(session, Update(update_id=1, channel_post=post)) == []
+
+
+async def test_reply_in_a_forum_topic_stays_in_the_topic(session):
+    forum = Chat(id=-1003, type="supergroup", title="Лісовий форум", is_forum=True)
+    start = Message(
+        message_id=9,
+        date=datetime.now(UTC),
+        chat=forum,
+        text="/start",
+        message_thread_id=17,
+        is_topic_message=True,
+    )
+    [request] = await feed(session, Update(update_id=1, message=start))
+    assert (request.text, request.message_thread_id) == (PRIVATE_ONLY, 17)
+
+
+def test_every_router_but_the_group_one_is_private():
+    # Новий роутер, підключений повз private_router, працював би й у групах.
+    assert DISPATCHER.sub_routers == [groups_router, private_router]
+    assert private_router.sub_routers
+    assert all(not router.sub_routers for router in private_router.sub_routers)
+
+
+def test_group_command_menu_has_only_start_and_help():
+    assert [command.command for command in GROUP_COMMANDS] == ["start", "help"]

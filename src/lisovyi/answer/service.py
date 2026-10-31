@@ -325,9 +325,11 @@ _PART_LABEL = {
     ForestPart.RICHKA: r"для\s+тих,\s+хто\s+біля\s+річки|біля\s+річки|коло\s+річки",
 }
 _PART_LABEL_AT_START = {
-    part: re.compile(rf"^(?:{pattern})(?=[\s,:]|$)[\s,:]*", re.IGNORECASE)
+    part: re.compile(rf"^(?:{pattern})(?=[\s,:—–-]|$)[\s,:—–-]*", re.IGNORECASE)
     for part, pattern in _PART_LABEL.items()
 }
+# «Біля річки й верби ростуть…»: мітка тут — частина спільного підмета, прибирати не можна.
+_CONJUNCTION_AT_START = re.compile(r"^(?:і|й|та|чи|або)\b", re.IGNORECASE)
 
 
 def drop_part_label(text: str, part: ForestPart) -> str:
@@ -336,7 +338,7 @@ def drop_part_label(text: str, part: ForestPart) -> str:
     Порожній залишок — повертається оригінал; посеред тексту нічого не прибирається.
     """
     rest = _PART_LABEL_AT_START[part].sub("", text, count=1)
-    if rest == text or not rest.strip():
+    if rest == text or not rest.strip() or _CONJUNCTION_AT_START.match(rest):
         return text
     return rest[0].upper() + rest[1:]
 

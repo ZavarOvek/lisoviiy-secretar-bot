@@ -9,19 +9,14 @@ from aiogram.methods import GetMe, SendMessage, TelegramMethod
 from aiogram.types import CallbackQuery, Chat, Document, Message, PhotoSize, Update, User
 
 from lisovyi.bot.groups import groups_router
-from lisovyi.bot.handlers import router
-from lisovyi.bot.library import library_router
-from lisovyi.bot.uploads import uploads_router
+from lisovyi.bot.private import private_router
 
 CHAT = Chat(id=42, type="private")
 USER = User(id=42, is_bot=False, first_name="Telegram-Їжак", username="hedgehog")
 
 # Роутери модульні й приєднуються до диспетчера лише раз; порядок — як у __main__.
 DISPATCHER = Dispatcher()
-DISPATCHER.include_router(groups_router)
-DISPATCHER.include_router(uploads_router)
-DISPATCHER.include_router(library_router)
-DISPATCHER.include_router(router)
+DISPATCHER.include_routers(groups_router, private_router)
 
 
 class RecordingSession(BaseSession):

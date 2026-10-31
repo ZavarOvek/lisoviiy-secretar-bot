@@ -8,7 +8,6 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from lisovyi.bot import texts
-from lisovyi.bot.groups import PRIVATE_CALLBACK, PRIVATE_MESSAGE
 from lisovyi.bot.places import Place, all_places, find_place, human_place, place_keyboard
 from lisovyi.bot.uploads import UploadDialogue
 from lisovyi.domain import PART_NAMES, DocumentKind, ForestPart
@@ -21,8 +20,6 @@ from lisovyi.uploads.service import ConflictError, MapRequired, NotFound
 log = logging.getLogger(__name__)
 
 library_router = Router(name="library")
-library_router.message.filter(PRIVATE_MESSAGE)
-library_router.callback_query.filter(PRIVATE_CALLBACK)
 
 DOCS_PREFIX = "docs:"
 DELETE_PREFIX = "del:"

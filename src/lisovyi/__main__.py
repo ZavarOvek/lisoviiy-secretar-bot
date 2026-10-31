@@ -4,14 +4,15 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
+from aiogram.types import BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats
 from groq import AsyncGroq
 
 from lisovyi.answer.llm import LLMClient
 from lisovyi.answer.service import AnswerService
-from lisovyi.bot.groups import groups_router
-from lisovyi.bot.handlers import COMMANDS, router
-from lisovyi.bot.library import library_router
-from lisovyi.bot.uploads import UploadDialogue, uploads_router
+from lisovyi.bot.groups import GROUP_COMMANDS, groups_router
+from lisovyi.bot.handlers import COMMANDS
+from lisovyi.bot.private import private_router
+from lisovyi.bot.uploads import UploadDialogue
 from lisovyi.config import Settings
 from lisovyi.db.session import make_engine, make_sessionmaker, run_migrations
 from lisovyi.ingest.importer import import_archive
@@ -75,17 +76,14 @@ async def run(settings: Settings, db_url: str) -> None:
         )
 
         bot = Bot(settings.telegram_bot_token)
-        await bot.set_my_commands(COMMANDS)
+        await bot.set_my_commands(COMMANDS, scope=BotCommandScopeAllPrivateChats())
+        await bot.set_my_commands(GROUP_COMMANDS, scope=BotCommandScopeAllGroupChats())
         log.info("bot commands: %s", ", ".join(command.command for command in COMMANDS))
         notifier = Notifier(bot, sessionmaker)
         uploads = UploadDialogue(UploadService(sessionmaker, search, notifier))
         dispatcher = Dispatcher()
-        # Завантаження першими: поки бот чекає ім'я звіра, текст — це ім'я, а не питання.
-        # Групи першими: там бот відповідає лише на /start і /help (вимога 1).
-        dispatcher.include_router(groups_router)
-        dispatcher.include_router(uploads_router)
-        dispatcher.include_router(library_router)
-        dispatcher.include_router(router)
+        # Вимога 1: у групах лише /start і /help, решта роутерів — під фільтром особистих чатів.
+        dispatcher.include_routers(groups_router, private_router)
         try:
             await dispatcher.start_polling(
                 bot,

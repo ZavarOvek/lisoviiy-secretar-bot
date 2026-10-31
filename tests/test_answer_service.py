@@ -656,6 +656,14 @@ async def test_wait_message_is_sent_once_across_both_paths(search):
         (ForestPart.RICHKA, "коло річки опеньки йдуть раніше", "Опеньки йдуть раніше"),
         (ForestPart.LYSTIANYI, "У листяному лісі.", "У листяному лісі."),
         (ForestPart.LYSTIANYI, "У листяному лісі", "У листяному лісі"),
+        (ForestPart.RICHKA, "Біля річки — утеплюйте очеретом.", "Утеплюйте очеретом."),
+        (ForestPart.RICHKA, "Біля річки – утеплюйте очеретом.", "Утеплюйте очеретом."),
+        (ForestPart.RICHKA, "Біля річки - утеплюйте очеретом.", "Утеплюйте очеретом."),
+        (ForestPart.RICHKA, "Біля річки й верби ростуть опеньки",
+         "Біля річки й верби ростуть опеньки"),
+        (ForestPart.LYSTIANYI, "У листяному лісі та біля річки утеплюють у листопаді",
+         "У листяному лісі та біля річки утеплюють у листопаді"),
+        (ForestPart.RICHKA, "Біля річки іноді заливає берег", "Іноді заливає берег"),
     ],
 )  # fmt: skip
 def test_drop_part_label(part, text, expected):
