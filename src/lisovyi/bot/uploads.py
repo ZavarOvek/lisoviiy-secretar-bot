@@ -30,6 +30,7 @@ from aiogram.utils.chat_action import ChatActionSender
 
 from lisovyi.answer.service import AnswerService
 from lisovyi.bot import texts
+from lisovyi.bot.groups import PRIVATE_CALLBACK, PRIVATE_MESSAGE
 from lisovyi.bot.handlers import answer_question
 from lisovyi.bot.places import all_places, find_place, human_place, place_keyboard
 from lisovyi.domain import PART_NAMES, DocumentKind, ForestPart, TextSource
@@ -49,6 +50,8 @@ from lisovyi.uploads.versions import find_version_candidate, rank_in_scope
 log = logging.getLogger(__name__)
 
 uploads_router = Router(name="uploads")
+uploads_router.message.filter(PRIVATE_MESSAGE)
+uploads_router.callback_query.filter(PRIVATE_CALLBACK)
 
 ACCEPTED = frozenset({".pdf", ".docx", ".txt"})
 # Telegram віддає ботам файли до 20 МБ.

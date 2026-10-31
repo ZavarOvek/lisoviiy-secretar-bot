@@ -10,12 +10,16 @@ from aiogram.utils.chat_action import ChatActionSender
 
 from lisovyi.answer.service import AnswerService
 from lisovyi.bot import texts
+from lisovyi.bot.groups import PRIVATE_CALLBACK, PRIVATE_MESSAGE
 from lisovyi.bot.places import PLACE_PREFIX, find_place, glove_places, place_keyboard
 from lisovyi.search.service import SearchService
 
 log = logging.getLogger(__name__)
 
 router = Router()
+# Вимога 1: лише особисті повідомлення; групи обробляє bot.groups.
+router.message.filter(PRIVATE_MESSAGE)
+router.callback_query.filter(PRIVATE_CALLBACK)
 
 COMMANDS = [
     BotCommand(command="start", description="Що я вмію"),

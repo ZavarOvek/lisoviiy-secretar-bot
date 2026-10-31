@@ -8,6 +8,7 @@ from groq import AsyncGroq
 
 from lisovyi.answer.llm import LLMClient
 from lisovyi.answer.service import AnswerService
+from lisovyi.bot.groups import groups_router
 from lisovyi.bot.handlers import COMMANDS, router
 from lisovyi.bot.library import library_router
 from lisovyi.bot.uploads import UploadDialogue, uploads_router
@@ -80,6 +81,8 @@ async def run(settings: Settings, db_url: str) -> None:
         uploads = UploadDialogue(UploadService(sessionmaker, search, notifier))
         dispatcher = Dispatcher()
         # Завантаження першими: поки бот чекає ім'я звіра, текст — це ім'я, а не питання.
+        # Групи першими: там бот відповідає лише на /start і /help (вимога 1).
+        dispatcher.include_router(groups_router)
         dispatcher.include_router(uploads_router)
         dispatcher.include_router(library_router)
         dispatcher.include_router(router)

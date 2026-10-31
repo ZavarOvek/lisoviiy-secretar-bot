@@ -5,9 +5,10 @@ from typing import Any
 
 from aiogram import Dispatcher
 from aiogram.client.session.base import BaseSession
-from aiogram.methods import SendMessage, TelegramMethod
+from aiogram.methods import GetMe, SendMessage, TelegramMethod
 from aiogram.types import CallbackQuery, Chat, Document, Message, PhotoSize, Update, User
 
+from lisovyi.bot.groups import groups_router
 from lisovyi.bot.handlers import router
 from lisovyi.bot.library import library_router
 from lisovyi.bot.uploads import uploads_router
@@ -17,6 +18,7 @@ USER = User(id=42, is_bot=False, first_name="Telegram-Їжак", username="hedge
 
 # Роутери модульні й приєднуються до диспетчера лише раз; порядок — як у __main__.
 DISPATCHER = Dispatcher()
+DISPATCHER.include_router(groups_router)
 DISPATCHER.include_router(uploads_router)
 DISPATCHER.include_router(library_router)
 DISPATCHER.include_router(router)
@@ -29,6 +31,9 @@ class RecordingSession(BaseSession):
 
     async def make_request(self, bot, method, timeout=None):
         self.requests.append(method)
+        if isinstance(method, GetMe):
+            # Command-фільтр звіряє «/start@бот» з іменем бота.
+            return User(id=1, is_bot=True, first_name="Лісовий секретар", username="LisoviyTestBot")
         if isinstance(method, SendMessage):
             return Message(
                 message_id=len(self.requests),
@@ -58,16 +63,16 @@ class NoUploads:
         return False
 
 
-def message_update(text: str, user: User = USER) -> Update:
+def message_update(text: str, user: User = USER, chat: Chat = CHAT) -> Update:
     return Update(
         update_id=1,
-        message=Message(message_id=1, date=datetime.now(UTC), chat=CHAT, from_user=user, text=text),
+        message=Message(message_id=1, date=datetime.now(UTC), chat=chat, from_user=user, text=text),
     )
 
 
 def document_update(
     file_name: str, *, file_id: str = "file-1", mime_type: str | None = None,
-    file_size: int | None = 100,
+    file_size: int | None = 100, chat: Chat = CHAT,
 ) -> Update:  # fmt: skip
     document = Document(
         file_id=file_id,
@@ -77,7 +82,7 @@ def document_update(
         file_size=file_size,
     )
     message = Message(
-        message_id=3, date=datetime.now(UTC), chat=CHAT, from_user=USER, document=document
+        message_id=3, date=datetime.now(UTC), chat=chat, from_user=USER, document=document
     )
     return Update(update_id=3, message=message)
 
@@ -90,8 +95,8 @@ def photo_update() -> Update:
     return Update(update_id=4, message=message)
 
 
-def callback_update(data: str) -> Update:
-    message = Message(message_id=7, date=datetime.now(UTC), chat=CHAT, text="Кнопки")
+def callback_update(data: str, chat: Chat = CHAT) -> Update:
+    message = Message(message_id=7, date=datetime.now(UTC), chat=chat, text="Кнопки")
     callback = CallbackQuery(
         id="cb1", from_user=USER, chat_instance="ci", message=message, data=data
     )
