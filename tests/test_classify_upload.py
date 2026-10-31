@@ -147,3 +147,29 @@ def test_nothing_found_asks_the_beast():
 )
 def test_upload_topic(title, topic, from_rules):
     assert upload_topic(title) == (topic, from_rules)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Для звірів, що живуть у хвойному лісі. Гриби збирайте після дощу.",
+        "Гриби\nДля звірів, що живуть у хвойному лісі. Гриби збирайте після дощу.",
+    ],
+    ids=["one-line", "with-heading"],
+)
+def test_rule_4_uses_the_same_intro_as_rule_3(text):
+    result = classify_upload("порада", text, GLOVES)
+    assert (result.kind, result.scope) == (DocumentKind.PART, "khvoinyi")
+
+
+def test_first_line_that_is_a_sentence_is_not_a_heading():
+    result = classify_upload(
+        "порада", "Мешканцям рукавички «Під вербою».\nНавесні латаття цвіте.", GLOVES
+    )
+    assert (result.kind, result.scope) == (DocumentKind.GLOVE, "Під вербою")
+
+
+def test_archive_classify_still_skips_the_first_line():
+    # Архівний classify не змінювався: однорядковий вступ без заголовка він не бачить.
+    one_line = "Для звірів, що живуть у хвойному лісі. Гриби збирайте після дощу."
+    assert classify("порада", one_line, GLOVES) is None

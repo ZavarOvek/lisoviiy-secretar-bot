@@ -152,7 +152,7 @@ def classify_upload(title: str, text: str, gloves: Collection[str]) -> UploadCla
     glove = glove_from_intro(text, gloves)
     if glove is not None:
         return UploadClassification(DocumentKind.GLOVE, glove, topic, from_rules)
-    scopes = _scopes_from_text(text)
+    scopes = _scopes_from_intro(text)
     if scopes is None:
         scopes = _scopes_from_title(title)
     if len(scopes) != 1:
@@ -177,14 +177,27 @@ def glove_from_intro(text: str, gloves: Collection[str]) -> str | None:
     return None
 
 
-def _intro_sentences(text: str) -> list[str]:
-    """Перші речення після заголовка. Порада з одного рядка заголовка не має.
+def _scopes_from_intro(text: str) -> set[str] | None:
+    """Правило 4 для завантажень: як `_scopes_from_text` архіву, але зі вступом правила 3."""
+    for sentence in _intro_sentences(text):
+        if ADDRESSEE_MARKER.search(sentence) and (scopes := _scopes_named_in(sentence)):
+            return scopes
+    return None
 
-    Пробіли й переноси згорнуті: PDF буває розриває назву в лапках («Під\n ялиною»).
+
+def _intro_sentences(text: str) -> list[str]:
+    """Перші речення поради — для правил 3 і 4 завантажень.
+
+    Перший рядок — заголовок лише тоді, коли після нього є ще текст і він не закінчується
+    як речення: архівні заголовки крапки не мають, а звір часто пише без заголовка
+    («Мешканцям рукавички «Під вербою».» першим рядком). Пробіли й переноси згорнуті: PDF
+    буває розриває назву в лапках («Під\n ялиною»).
     """
-    head, newline, body = text.strip().partition("\n")
-    flat = " ".join((body if newline else head).split())
-    return [s for s in re.split(r"(?<=[.!?])\s+", flat) if s][:SENTENCES_TO_CHECK]
+    stripped = text.strip()
+    head, newline, body = stripped.partition("\n")
+    heading = bool(newline) and not head.rstrip().endswith((".", "!", "?", "…"))
+    flat = " ".join((body if heading else stripped).split())
+    return [s for s in re.split(r"(?<=[.!?…])\s+", flat) if s][:SENTENCES_TO_CHECK]
 
 
 def upload_topic(title: str) -> tuple[str, bool]:
