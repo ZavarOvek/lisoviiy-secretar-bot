@@ -90,3 +90,12 @@ class ForestMapEntry(Base):
     map_document_id: Mapped[int] = mapped_column(ForeignKey("documents.id"))
     # Місце в легенді карти: у цьому порядку бот показує кнопки рукавичок.
     position: Mapped[int] = mapped_column(Integer, server_default=sql_text("0"))
+
+
+class Subscription(Base):
+    """Чат, що хоче знати про нові й замінені поради. Ім'я звіра для цього не потрібне."""
+
+    __tablename__ = "subscriptions"
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
