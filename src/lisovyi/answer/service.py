@@ -11,7 +11,14 @@ from typing import Any
 from lisovyi.answer import texts
 from lisovyi.answer.dialogue import DialogueMemory
 from lisovyi.answer.llm import Completion, LLMClient, LLMError, Notify, OutputRejected, Usage
-from lisovyi.answer.prompt import KINDS, build_messages
+from lisovyi.answer.prompt import (
+    KINDS,
+    build_conflict_messages,
+    build_messages,
+    conflict_response_format,
+)
+from lisovyi.domain import ForestPart
+from lisovyi.search.conflicts import PartConflict, detect_part_conflict
 from lisovyi.search.places import PlaceResolver, Places
 from lisovyi.search.retrieve import ContextDoc, ContextPack, Mode, display_date
 from lisovyi.search.service import SearchService
@@ -34,7 +41,7 @@ class Reply:
     # Назви рукавичок для кнопок, у порядку карти; порожньо — без кнопок.
     keyboard: list[str]
     # kind моделі, або ask_glove / not_found з пошуку, ask_question (саме місце без питання),
-    # або unsure / busy / error.
+    # conflict (поради частин лісу по пунктах, бриф 05), або unsure / busy / error.
     kind: str
     # Назви файлів джерел, у порядку номерів.
     sources: list[str]
@@ -89,7 +96,98 @@ class AnswerService:
             if pack.mode == Mode.ASK_GLOVE:
                 gloves = self.search.state.resolver.gloves
                 return Reply(texts.ASK_GLOVE, gloves, "ask_glove", [], None, pack.mode, context)
+            state = self.search.state
+            conflict = detect_part_conflict(question, pack, state.index, state.resolver)
+            if conflict is not None:
+                reply = await self._ask_by_part(question, pack, conflict, notify)
+                if reply is not None:
+                    return reply
             return await self._ask_model(question, pack, notify)
+
+    async def _ask_by_part(
+        self, question: str, pack: ContextPack, conflict: PartConflict, notify: Notify | None
+    ) -> Reply | None:
+        """Вимога 8: окремий пункт для кожної частини, вступ і завершення — від бота.
+
+        Модель не має де обрати одну пораду. None — відповідь двічі непридатна, і тоді
+        питання йде звичайним шляхом.
+        """
+        parts = list(conflict.docs)
+        messages = build_conflict_messages(question, pack, conflict.glove, parts)
+        response_format = conflict_response_format(parts)
+        context = [doc.filename for doc in pack.docs]
+        usage: Usage | None = None
+        raw: list[str] = []
+        attempts: list[Attempt] = []
+        notify = _once(notify) if notify is not None else None
+        for attempt in range(ATTEMPTS):
+            try:
+                completion = await self.llm.complete(messages, notify, response_format)
+            except LLMError as error:
+                kind = "busy" if error.reply == texts.BUSY else "error"
+                return Reply(
+                    error.reply, [], kind, [], usage, pack.mode, context, raw, attempt, attempts
+                )
+            except OutputRejected as rejected:
+                raw.append("")
+                attempts.append(Attempt(rejected.model, "rejected", None))
+                continue
+            raw.append(completion.content)
+            attempts.append(
+                Attempt(
+                    completion.model,
+                    completion.finish_reason,
+                    completion.usage.completion_tokens if completion.usage else None,
+                )
+            )
+            usage = _add(usage, completion.usage)
+            items = parse_by_part(completion, parts, len(pack.docs))
+            log.info(
+                "llm by part: model=%s glove=%s valid=%s question=%r",
+                completion.model,
+                conflict.glove,
+                items is not None,
+                question,
+            )
+            if items is not None:
+                return self._by_part_reply(conflict, items, pack, usage, raw, attempt, attempts)
+        log.warning("unusable answer by part, falling back: question=%r raw=%r", question, raw[-1])
+        return None
+
+    def _by_part_reply(
+        self,
+        conflict: PartConflict,
+        items: dict[str, tuple[str, list[int]]],
+        pack: ContextPack,
+        usage: Usage | None,
+        raw: list[str],
+        retries: int,
+        attempts: list[Attempt],
+    ) -> Reply:
+        parts = list(conflict.docs)
+        intro = texts.CONFLICT_INTRO.format(
+            glove=conflict.glove,
+            parts=", ".join(f"і до {texts.PART_GENITIVE[part]}" for part in parts),
+        )
+        lines = [f"{texts.PART_LINE[part]}: {clean_text(items[part.value][0])}" for part in parts]
+        if "general" in items:
+            lines.append(f"{texts.CONFLICT_GENERAL}: {clean_text(items['general'][0])}")
+        numbers = sorted({n for _, sources in items.values() for n in sources})
+        docs = [pack.docs[n - 1] for n in numbers]
+        block = sources_block(docs)
+        body = "\n\n".join([intro, "\n".join(lines), texts.CONFLICT_OUTRO])
+        return Reply(
+            text=truncate(body, MAX_MESSAGE_CHARS - len(block)) + block,
+            keyboard=[],
+            kind="conflict",
+            sources=[doc.filename for doc in docs],
+            usage=usage,
+            mode=pack.mode,
+            context=[doc.filename for doc in pack.docs],
+            raw=raw,
+            retries=retries,
+            attempts=attempts,
+        )
 
     async def _ask_model(self, question: str, pack: ContextPack, notify: Notify | None) -> Reply:
         messages = build_messages(question, pack)
@@ -199,6 +297,47 @@ def parse_completion(completion: Completion, pack_size: int) -> _Parsed | None:
     if not clean_text(text) or (kind in KINDS_NEEDING_SOURCES and not numbers):
         return None
     return _Parsed(kind, text, numbers)
+
+
+def parse_by_part(
+    completion: Completion, parts: list[ForestPart], pack_size: int
+) -> dict[str, tuple[str, list[int]]] | None:
+    """Пункти відповіді по частинах: частина (або "general") → (текст, номери джерел).
+
+    None — непридатно: немає пункту якоїсь частини, текст порожній після чистки або жодного
+    валідного джерела. Номери поза пакетом відкидаються.
+    """
+    if completion.finish_reason == "length":
+        return None
+    try:
+        data: Any = json.loads(completion.content)
+    except ValueError:
+        return None
+    entries = data.get("parts") if isinstance(data, dict) else None
+    if not isinstance(entries, list):
+        return None
+    allowed = {part.value for part in parts} | {"general"}
+    items: dict[str, tuple[str, list[int]]] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            return None
+        part, text, sources = entry.get("part"), entry.get("text"), entry.get("sources")
+        if part not in allowed or not isinstance(text, str) or not isinstance(sources, list):
+            return None
+        if part in items or not clean_text(text):
+            continue
+        numbers = sorted(
+            {
+                n
+                for n in sources
+                if isinstance(n, int) and not isinstance(n, bool) and 1 <= n <= pack_size
+            }
+        )
+        items[part] = (text, numbers)
+    for part in parts:
+        if part.value not in items or not items[part.value][1]:
+            return None
+    return items
 
 
 def sources_block(docs: list[ContextDoc]) -> str:

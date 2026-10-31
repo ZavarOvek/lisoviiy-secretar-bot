@@ -9,6 +9,7 @@ from groq_fakes import FakeGroq, completion
 
 from lisovyi.answer import texts
 from lisovyi.answer.llm import Completion, LLMBroken, LLMBusy, LLMClient, OutputRejected, Usage
+from lisovyi.answer.prompt import RESPONSE_FORMAT, SYSTEM_PROMPT
 from lisovyi.answer.service import MAX_MESSAGE_CHARS, AnswerService, clean_text, truncate
 from lisovyi.domain import DocumentKind, ForestPart
 from lisovyi.search import service as search_module
@@ -34,9 +35,11 @@ class FakeLLM:
     def __init__(self, *outcomes: Any):
         self.outcomes = list(outcomes)
         self.calls: list[tuple[list[dict[str, str]], Any]] = []
+        self.formats: list[Any] = []
 
-    async def complete(self, messages, notify=None):
+    async def complete(self, messages, notify=None, response_format=None):
         self.calls.append((messages, notify))
+        self.formats.append(response_format)
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, BaseException):
             raise outcome
@@ -449,3 +452,130 @@ async def test_attempts_record_the_answering_model_and_finish_reason(search):
         ("main-model", "length", 100),
         ("main-model", "stop", 100),
     ]
+
+
+# --- конфлікт частин лісу «Під вербою» (бриф 05, §2.6)
+
+WARMING = "Чим утеплити рукавичку під вербою?"
+
+
+def by_part(*items: tuple[str, str, list[int]]) -> Completion:
+    parts = [{"part": part, "text": text, "sources": sources} for part, text, sources in items]
+    return raw_completion(json.dumps({"parts": parts}, ensure_ascii=False))
+
+
+def _number(search, question: str, filename: str) -> int:
+    pack = search.search(question)
+    return [doc.filename for doc in pack.docs].index(filename) + 1
+
+
+async def test_conflict_answer_is_built_by_the_bot(search):
+    leaf = _number(search, WARMING, "Як утеплити рукавичку в листяному лісі.docx")
+    river = _number(search, WARMING, "Як утеплити рукавичку біля річки.pdf")
+    llm = FakeLLM(
+        by_part(
+            ("lystianyi", "Насипте **сухого** дубового листя (джерело 5).", [leaf]),
+            ("richka", "Піднімайте вашу рукавичку на коріння й утеплюйте очеретом.", [river, 99]),
+        )
+    )
+    reply = await service(search, llm).answer(1, WARMING)
+
+    assert reply.kind == "conflict"
+    body, block = reply.text.split("\n\nДжерела:\n")
+    assert body == (
+        "Рукавичка «Під вербою» належить і до листяного лісу, і до тих, хто біля річки, "
+        "і поради для них різняться:\n\n"
+        "Листяний ліс: Насипте сухого дубового листя.\n"
+        "Біля річки: Піднімайте рукавичку на коріння й утеплюйте очеретом.\n\n"
+        "Оберіть ту, що підходить саме вашому місцю."
+    )
+    first, second = sorted([leaf, river])
+    pack = search.search(WARMING)
+    assert block.split("\n") == [
+        f"— {pack.docs[first - 1].title}",
+        f"— {pack.docs[second - 1].title}",
+    ]
+    assert reply.sources == [pack.docs[first - 1].filename, pack.docs[second - 1].filename]
+
+
+async def test_conflict_request_uses_another_schema_and_the_same_system_prompt(search):
+    llm = FakeLLM(
+        by_part(("lystianyi", "Листя.", [1]), ("richka", "Очерет.", [2])),
+        reply_json(),
+    )
+    answers = service(search, llm)
+    await answers.answer(1, WARMING)
+    await answers.answer(2, "Які гриби біля сосон?")
+
+    conflict_messages, normal_messages = llm.calls[0][0], llm.calls[1][0]
+    assert (
+        conflict_messages[0] == normal_messages[0] == {"role": "system", "content": SYSTEM_PROMPT}
+    )
+    user = conflict_messages[1]["content"]
+    note = (
+        "Рукавичка «Під вербою» належить до кількох частин лісу: листяний ліс, біля річки. "
+        "Їхні поради на це питання різняться."
+    )
+    assert user.startswith(f"Питання звіра: {WARMING}\n\n{note}")
+    assert user.index(note) < user.index("Місце: Під вербою")
+    schema = llm.formats[0]["json_schema"]
+    assert schema["strict"] is True
+    item = schema["schema"]["properties"]["parts"]["items"]
+    assert item["properties"]["part"]["enum"] == ["lystianyi", "richka", "general"]
+    assert llm.formats[1] in (None, RESPONSE_FORMAT)
+
+
+async def test_conflict_answer_with_a_general_item(search):
+    llm = FakeLLM(
+        by_part(
+            ("lystianyi", "Листям.", [1]),
+            ("richka", "Очеретом.", [2]),
+            ("general", "Утеплюють у листопаді.", [3]),
+        )
+    )
+    reply = await service(search, llm).answer(1, WARMING)
+    assert "Біля річки: Очеретом.\nДля всього лісу: Утеплюють у листопаді.\n\nОберіть" in reply.text
+    assert len(reply.sources) == 3
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        by_part(("lystianyi", "Листям.", [1])),
+        by_part(("lystianyi", "Листям.", [1]), ("richka", "  **  ", [2])),
+        by_part(("lystianyi", "Листям.", [1]), ("richka", "Очеретом.", [99])),
+        raw_completion("{не json"),
+        OutputRejected("main-model"),
+    ],
+    ids=["missing-part", "empty-text", "foreign-sources", "invalid-json", "rejected"],
+)
+async def test_unusable_conflict_answer_is_retried_then_falls_back(bad, search, caplog):
+    llm = FakeLLM(bad, bad, reply_json(text="Звичайна відповідь.", sources=[1]))
+    with caplog.at_level(logging.WARNING):
+        reply = await service(search, llm).answer(1, WARMING)
+    assert len(llm.calls) == 3
+    assert llm.formats[0] == llm.formats[1] != llm.formats[2]
+    assert reply.kind == "answer"
+    assert reply.text.startswith("Звичайна відповідь.")
+    assert "unusable answer by part, falling back" in caplog.text
+
+
+async def test_conflict_retry_succeeds(search):
+    llm = FakeLLM(
+        by_part(("lystianyi", "Листям.", [1])),
+        by_part(("lystianyi", "Листям.", [1]), ("richka", "Очеретом.", [2])),
+    )
+    reply = await service(search, llm).answer(1, WARMING)
+    assert (reply.kind, reply.retries, len(llm.calls)) == ("conflict", 1, 2)
+
+
+async def test_busy_during_a_conflict_answer(search):
+    reply = await service(search, FakeLLM(LLMBusy())).answer(1, WARMING)
+    assert (reply.kind, reply.text) == ("busy", texts.BUSY)
+
+
+async def test_no_conflict_keeps_the_usual_path(search):
+    llm = FakeLLM(reply_json())
+    reply = await service(search, llm).answer(1, "Чим утеплити рукавичку біля бобрової греблі?")
+    assert reply.kind == "answer"
+    assert llm.formats == [None]

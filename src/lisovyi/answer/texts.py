@@ -25,3 +25,18 @@ PART_ABOUT = {
     ForestPart.LYSTIANYI: "листяний ліс",
     ForestPart.RICHKA: "тих, хто біля річки",
 }
+
+# Конфлікт частин лісу (бриф 05, §2.6): текст будує бот, модель заповнює лише пункти.
+CONFLICT_INTRO = "Рукавичка «{glove}» належить {parts}, і поради для них різняться:"
+CONFLICT_GENERAL = "Для всього лісу"
+CONFLICT_OUTRO = "Оберіть ту, що підходить саме вашому місцю."
+PART_GENITIVE = {
+    ForestPart.KHVOINYI: "хвойного лісу",
+    ForestPart.LYSTIANYI: "листяного лісу",
+    ForestPart.RICHKA: "тих, хто біля річки",
+}
+PART_LINE = {
+    ForestPart.KHVOINYI: "Хвойний ліс",
+    ForestPart.LYSTIANYI: "Листяний ліс",
+    ForestPart.RICHKA: "Біля річки",
+}

@@ -331,3 +331,10 @@ async def test_queue_wait_is_bounded():
     assert first.model == "main-model"
     assert isinstance(second, LLMBusy)
     assert len(fake.calls) == 1
+
+
+async def test_another_response_format_reaches_groq():
+    fake = FakeGroq(OK)
+    other = {"type": "json_schema", "json_schema": {"name": "x", "strict": True, "schema": {}}}
+    await _client(fake)[0].complete(MESSAGES, response_format=other)
+    assert fake.calls[0]["response_format"] is other

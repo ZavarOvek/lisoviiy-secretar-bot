@@ -40,7 +40,10 @@ EXPECTED_KIND = {
     "answer_with_caveat": {"answer"},
     "answer_general_only": {"answer"},
     "answer_general_plus_glove_note": {"answer"},
-    "conflict_both": {"answer", "variants"},
+    # Бриф 05: конфлікт частин «Під вербою» тепер має окремий kind.
+    "conflict_both": {"answer", "variants", "conflict"},
+    # Питання поза gold-набором (--extra): очікуваного kind немає.
+    "extra": set(),
     "variants_by_part": {"variants"},
     "ask_glove": {"ask_glove"},
     "not_found": {"not_found"},
@@ -94,7 +97,8 @@ def summarize(rows: list[dict[str, Any]], gold: dict[str, dict[str, Any]]) -> No
         expected = EXPECTED_KIND[question["behavior"]]
         evidence = sorted({item["doc"] for item in question["evidence"]})
         found = [doc for doc in evidence if doc in row["sources"]]
-        kind_match = row["kind"] in expected
+        # Для --extra очікуваного kind немає: рядок лише показує, що вийшло.
+        kind_match = not expected or row["kind"] in expected
         evidence_match = len(found) == len(evidence)
         kind_ok += kind_match
         evidence_ok += evidence_match
@@ -102,7 +106,7 @@ def summarize(rows: list[dict[str, Any]], gold: dict[str, dict[str, Any]]) -> No
             name for name, ok in [("kind", kind_match), ("evidence", evidence_match)] if not ok
         ]
         print(
-            f"{row['id']:<4} {question['behavior']:<31} {'/'.join(sorted(expected)):<18} "
+            f"{row['id']:<4} {question['behavior']:<31} {'/'.join(sorted(expected)) or '-':<18} "
             f"{row['kind']:<10} {len(found):>3}/{len(evidence):<4}  {', '.join(flags)}"
         )
         for key in totals:
@@ -125,6 +129,7 @@ async def main(
     model: str | None,
     reasoning_effort: str | None = None,
     max_completion_tokens: int | None = None,
+    extra: list[str] | None = None,
 ) -> None:
     settings = Settings()
     if model:
@@ -141,6 +146,10 @@ async def main(
         if unknown:
             raise SystemExit(f"unknown gold ids: {', '.join(sorted(unknown))}")
     questions = [item for item in gold.values() if not only or item["id"] in only]
+    for number, text in enumerate(extra or [], start=1):
+        item = {"id": f"X{number}", "turns": [text], "behavior": "extra", "evidence": []}
+        gold[item["id"]] = item
+        questions.append(item)
 
     db_url = settings.db_url()
     await asyncio.to_thread(run_migrations, db_url)
@@ -185,6 +194,9 @@ if __name__ == "__main__":
     )
     parser = argparse.ArgumentParser(prog="python scripts/run_gold.py")
     parser.add_argument("--only", help="comma-separated gold ids, e.g. T04,T12")
+    parser.add_argument(
+        "--extra", action="append", default=[], help="a question outside the gold set (repeatable)"
+    )
     parser.add_argument("--model", help="Groq model for this run only; disables the fallback")
     parser.add_argument(
         "--reasoning-effort", choices=["low", "medium", "high"], help="for this run only"
@@ -196,4 +208,6 @@ if __name__ == "__main__":
     only = {item.strip() for item in args.only.split(",") if item.strip()} if args.only else None
     if args.max_completion_tokens is not None and args.max_completion_tokens <= 0:
         parser.error("--max-completion-tokens must be positive")
-    asyncio.run(main(only, args.model, args.reasoning_effort, args.max_completion_tokens))
+    asyncio.run(
+        main(only, args.model, args.reasoning_effort, args.max_completion_tokens, args.extra)
+    )

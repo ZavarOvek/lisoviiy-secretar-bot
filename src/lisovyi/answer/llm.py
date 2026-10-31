@@ -116,9 +116,14 @@ class LLMClient:
         self._not_before: dict[str, float] = {}
 
     async def complete(
-        self, messages: list[dict[str, str]], notify: Notify | None = None
+        self,
+        messages: list[dict[str, str]],
+        notify: Notify | None = None,
+        response_format: dict[str, Any] = RESPONSE_FORMAT,
     ) -> Completion:
         """Один запит до моделі; на 429 — не більше одного повтору.
+
+        `response_format` — схема відповіді; інша лише для конфлікту частин лісу (бриф 05).
 
         Повтор — одразу запасною моделлю, якщо вона задана. Інакше, якщо Groq просить
         чекати не довше `max_wait`, — `notify(WAIT)`, пауза й той самий запит ще раз.
@@ -131,17 +136,22 @@ class LLMClient:
             log.warning("llm queue: waited %.0fs for the previous call, giving up", self.max_wait)
             raise LLMBusy from None
         try:
-            return await self._complete(messages, notify)
+            return await self._complete(messages, notify, response_format)
         finally:
             self._lock.release()
 
-    async def _complete(self, messages: list[dict[str, str]], notify: Notify | None) -> Completion:
+    async def _complete(
+        self,
+        messages: list[dict[str, str]],
+        notify: Notify | None,
+        response_format: dict[str, Any],
+    ) -> Completion:
         try:
-            return await self._call(self.model, messages)
+            return await self._call(self.model, messages, response_format)
         except _RateLimited as limited:
             retry_after = limited.retry_after
         if self.fallback_model:
-            return await self._call_or_busy(self.fallback_model, messages)
+            return await self._call_or_busy(self.fallback_model, messages, response_format)
         if retry_after > self.max_wait:
             raise LLMBusy
         if notify is not None:
@@ -149,15 +159,19 @@ class LLMClient:
         await self._sleep(retry_after + RETRY_MARGIN)
         # Чекали рівно стільки, скільки просив Groq.
         self._not_before.pop(self.model, None)
-        return await self._call_or_busy(self.model, messages)
+        return await self._call_or_busy(self.model, messages, response_format)
 
-    async def _call_or_busy(self, model: str, messages: list[dict[str, str]]) -> Completion:
+    async def _call_or_busy(
+        self, model: str, messages: list[dict[str, str]], response_format: dict[str, Any]
+    ) -> Completion:
         try:
-            return await self._call(model, messages)
+            return await self._call(model, messages, response_format)
         except _RateLimited:
             raise LLMBusy from None
 
-    async def _call(self, model: str, messages: list[dict[str, str]]) -> Completion:
+    async def _call(
+        self, model: str, messages: list[dict[str, str]], response_format: dict[str, Any]
+    ) -> Completion:
         # Після 429 наступні питання не йдуть до Groq, поки не мине retry-after: інакше
         # кожне з них отримало б той самий 429, а денний ліміт — ще й годину «за хвилину».
         remaining = self._not_before.get(model, 0.0) - self._clock()
@@ -169,7 +183,7 @@ class LLMClient:
             response = await self._client.chat.completions.create(
                 model=model,
                 messages=messages,
-                response_format=RESPONSE_FORMAT,
+                response_format=response_format,
                 reasoning_effort=self.reasoning_effort,
                 max_completion_tokens=self.max_completion_tokens,
                 temperature=TEMPERATURE,

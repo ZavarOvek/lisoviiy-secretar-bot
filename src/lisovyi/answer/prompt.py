@@ -1,7 +1,9 @@
 """Промпт для Groq: статичний системний промпт, повідомлення звіра і схема відповіді."""
 
+from collections.abc import Sequence
 from typing import Any
 
+from lisovyi.domain import PART_NAMES, ForestPart
 from lisovyi.search.retrieve import ContextPack
 
 # Дослівно з брифу 03b, два рядки про звертання — з брифу 04. Жодних змінних і форматування: Groq кешує префікс промпту, і будь-яка
@@ -55,6 +57,45 @@ RESPONSE_FORMAT: dict[str, Any] = {
     "type": "json_schema",
     "json_schema": {"name": "forest_answer", "strict": True, "schema": RESPONSE_SCHEMA},
 }
+
+
+# Конфлікт частин лісу (бриф 05, §2.6): дослівно з брифу. Системний промпт той самий — кеш.
+CONFLICT_NOTE = 'Рукавичка «{glove}» належить до кількох частин лісу: {parts}. Їхні поради на це питання різняться. Цього разу відповідай JSON за іншою схемою: для кожної частини лісу окремо коротко дай відповідь лише з її записів; якщо є загальна порада для всього лісу на ту саму тему — додай її окремим пунктом з part = "general". Не порівнюй поради і не обирай між ними.'
+
+
+def conflict_response_format(parts: Sequence[ForestPart]) -> dict[str, Any]:
+    """Strict-схема відповіді по частинах: пункт на кожну частину рукавички і, можливо, general."""
+    item = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["part", "text", "sources"],
+        "properties": {
+            "part": {"type": "string", "enum": [part.value for part in parts] + ["general"]},
+            "text": {"type": "string"},
+            "sources": {"type": "array", "items": {"type": "integer"}},
+        },
+    }
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["parts"],
+        "properties": {"parts": {"type": "array", "items": item}},
+    }
+    return {
+        "type": "json_schema",
+        "json_schema": {"name": "forest_answer_by_part", "strict": True, "schema": schema},
+    }
+
+
+def build_conflict_messages(
+    question: str, pack: ContextPack, glove: str, parts: Sequence[ForestPart]
+) -> list[dict[str, str]]:
+    """Той самий системний промпт; абзац про конфлікт — після питання, перед записами."""
+    note = CONFLICT_NOTE.format(glove=glove, parts=", ".join(PART_NAMES[p] for p in parts))
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": f"Питання звіра: {question}\n\n{note}\n\n{pack.render()}"},
+    ]
 
 
 def user_message(question: str, pack: ContextPack) -> str:
