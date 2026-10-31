@@ -222,9 +222,36 @@ _MARKUP_EMPHASIS = re.compile(r"\*\*|__")
 _MARKUP_HEADING = re.compile(r"^[ \t]*#+[ \t]*", re.MULTILINE)
 
 
+# «у вашій рукавичці»: бот не знає, де живе звір, що питає, а промпт цього модель не відучив.
+# «рукавич», а не «рукавичк»: у місцевому відмінку «рукавичці» к чергується з ц.
+_PRESUMED_GLOVE = re.compile(r"\b(в)аш(?:а|ої|ій|у|ою|і|их|ими)\s+(?=рукавич)", re.IGNORECASE)
+# «(джерело 1)», «(джерела 4, 5)»: джерела показує бот, а не модель.
+_SOURCE_MENTION = re.compile(r"\s*\((?:джерело|джерела)\s*[\d,\sі]+\)", re.IGNORECASE)
+
+
 def clean_text(text: str) -> str:
-    """Без `**`, `__` і `#` на початку рядків: повідомлення йде без parse_mode."""
-    return _MARKUP_HEADING.sub("", _MARKUP_EMPHASIS.sub("", text)).strip()
+    """Чистка тексту моделі перед відправкою (повідомлення йде без parse_mode).
+
+    Без `**`, `__` і `#` на початку рядків, без присвійного «ваш…» перед «рукавич…»
+    і без «(джерело N)».
+    """
+    text = _MARKUP_HEADING.sub("", _MARKUP_EMPHASIS.sub("", text))
+    text = _SOURCE_MENTION.sub("", text)
+    return _drop_presumed_glove(text).strip()
+
+
+def _drop_presumed_glove(text: str) -> str:
+    """«У вашій рукавичці» → «У рукавичці»; «Ваша рукавичка» → «Рукавичка»."""
+    out, position = [], 0
+    for match in _PRESUMED_GLOVE.finditer(text):
+        out.append(text[position : match.start()])
+        position = match.end()
+        if match[1] == "В" and position < len(text):
+            # «Ваш…» починало речення: велика літера переходить на «рукавич…».
+            out.append(text[position].upper())
+            position += 1
+    out.append(text[position:])
+    return "".join(out)
 
 
 _SENTENCE_END = re.compile(r"[.!?…](?=\s)")
