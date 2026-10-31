@@ -97,10 +97,9 @@ def test_start_text_uses_digits_for_other_counts():
 # --- хендлери
 
 
-@pytest.mark.parametrize("command", ["/start", "/help"])
-async def test_start_and_help(command, bot, session):
+async def test_start(bot, session):
     answers = FakeAnswers(_reply())
-    await _feed(bot, _message(command), answers)
+    await _feed(bot, _message("/start"), answers)
     [sent] = session.sent(SendMessage)
     assert sent.text == START_TEXT
     assert "Які гриби біля сосон?" in sent.text

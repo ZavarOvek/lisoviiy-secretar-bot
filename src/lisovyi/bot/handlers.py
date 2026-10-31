@@ -1,10 +1,10 @@
-"""Telegram: /start і /help, питання звичайним текстом, кнопки рукавичок."""
+"""Telegram: /start, питання звичайним текстом, кнопки рукавичок."""
 
 import logging
 
 from aiogram import Bot, F, Router
 from aiogram.enums import ChatAction
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import CommandStart
 from aiogram.types import BotCommand, CallbackQuery, Message
 from aiogram.utils.chat_action import ChatActionSender
 
@@ -20,6 +20,10 @@ router = Router()
 COMMANDS = [
     BotCommand(command="start", description="Що я вмію"),
     BotCommand(command="help", description="Довідка"),
+    BotCommand(command="docs", description="Усі поради за місцями"),
+    BotCommand(command="my", description="Мої поради"),
+    BotCommand(command="subscribe", description="Повідомляти про нові поради"),
+    BotCommand(command="unsubscribe", description="Більше не повідомляти"),
     BotCommand(command="name", description="Змінити своє ім'я"),
 ]
 
@@ -48,7 +52,6 @@ def start_text(gloves: int) -> str:
 
 
 @router.message(CommandStart())
-@router.message(Command("help"))
 async def start(message: Message, search: SearchService) -> None:
     await message.answer(start_text(len(search.state.resolver.gloves)))
 

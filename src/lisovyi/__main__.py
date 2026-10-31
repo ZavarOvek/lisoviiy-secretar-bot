@@ -9,10 +9,12 @@ from groq import AsyncGroq
 from lisovyi.answer.llm import LLMClient
 from lisovyi.answer.service import AnswerService
 from lisovyi.bot.handlers import COMMANDS, router
+from lisovyi.bot.library import library_router
 from lisovyi.bot.uploads import UploadDialogue, uploads_router
 from lisovyi.config import Settings
 from lisovyi.db.session import make_engine, make_sessionmaker, run_migrations
 from lisovyi.ingest.importer import import_archive
+from lisovyi.library import Library
 from lisovyi.notify import Notifier
 from lisovyi.search.service import SearchService
 from lisovyi.uploads.service import UploadService
@@ -77,8 +79,16 @@ async def run(settings: Settings, db_url: str) -> None:
         dispatcher = Dispatcher()
         # Завантаження першими: поки бот чекає ім'я звіра, текст — це ім'я, а не питання.
         dispatcher.include_router(uploads_router)
+        dispatcher.include_router(library_router)
         dispatcher.include_router(router)
-        await dispatcher.start_polling(bot, search=search, answers=answers, uploads=uploads)
+        await dispatcher.start_polling(
+            bot,
+            search=search,
+            answers=answers,
+            uploads=uploads,
+            library=Library(sessionmaker),
+            notifier=notifier,
+        )
     finally:
         await engine.dispose()
 
