@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from lisovyi.db.models import Beast, Document
 from lisovyi.domain import GENERAL_SCOPE, DocumentKind, DocumentStatus, ForestPart, TextSource
 from lisovyi.ingest.classify import MAP_TITLE, MAP_TOPIC
+from lisovyi.ingest.forest_map import parse_forest_map
 from lisovyi.ingest.importer import rebuild_forest_map
 from lisovyi.ingest.parsers import Extracted
 from lisovyi.search.service import SearchService
@@ -24,6 +25,24 @@ _NAME_EXTRA = frozenset(" -'’ʼ")
 
 class ConflictError(Exception):
     """Документ, який звір замінює, уже не активний: його щойно замінив хтось інший."""
+
+
+class NotFound(LookupError):
+    """Документа немає або він уже не активний."""
+
+
+class MapRequired(Exception):
+    """Карту не можна видалити: попередньої карти, до якої повернутися, немає."""
+
+
+@dataclass(frozen=True)
+class DeletedDocument:
+    id: int
+    title: str
+    kind: DocumentKind
+    # Попередня версія, що знову стала активною; None — нічого не повернулося.
+    restored_id: int | None = None
+    restored_title: str | None = None
 
 
 @dataclass(frozen=True)
@@ -297,6 +316,65 @@ class UploadService:
             )
         await self.search.reload()
         return orphans
+
+    async def delete(self, beast: BeastInfo, document_id: int) -> DeletedDocument:
+        """М'яке видалення власного документа з поверненням безпосередньої попередньої версії.
+
+        Власника перевіряє саме сервіс: callback-дані може підробити будь-хто. Повертається
+        лише версія зі статусом replaced, навіть чужа; видалена не воскресає ніколи. Для
+        карти forest_map перебудовується з повернутої; без неї карту видалити не можна.
+        """
+        async with self._sessionmaker() as session:
+            try:
+                async with session.begin():
+                    document = await session.scalar(
+                        select(Document).where(Document.id == document_id).with_for_update()
+                    )
+                    if document is None or document.status != DocumentStatus.ACTIVE:
+                        raise NotFound(f"document {document_id} is not active")
+                    if document.author_id != beast.id:
+                        raise PermissionError(
+                            f"beast {beast.telegram_id} is not the author of document {document_id}"
+                        )
+                    previous = None
+                    if document.replaces_id is not None:
+                        previous = await session.scalar(
+                            select(Document)
+                            .where(Document.id == document.replaces_id)
+                            .with_for_update()
+                        )
+                    if previous is not None and previous.status != DocumentStatus.REPLACED:
+                        previous = None
+                    if document.kind == DocumentKind.MAP and previous is None:
+                        raise MapRequired(f"map {document_id} has no previous map to restore")
+                    document.status = DocumentStatus.DELETED
+                    # Спершу звільняємо (scope, topic), потім повертаємо попередню версію:
+                    # інакше дві активні версії порушили б частковий унікальний індекс.
+                    await session.flush()
+                    if previous is not None:
+                        previous.status = DocumentStatus.ACTIVE
+                        await session.flush()
+                    if document.kind == DocumentKind.MAP:
+                        assert previous is not None
+                        forest_map = parse_forest_map(previous.text)
+                        await rebuild_forest_map(session, forest_map, previous.id)
+                    deleted = DeletedDocument(
+                        document.id,
+                        document.title,
+                        document.kind,
+                        previous.id if previous is not None else None,
+                        previous.title if previous is not None else None,
+                    )
+            except IntegrityError as exc:
+                raise ConflictError(f"document {document_id} changed meanwhile") from exc
+        log.info(
+            "beast %d deleted document %d, restored %s",
+            beast.telegram_id,
+            document_id,
+            deleted.restored_id,
+        )
+        await self.search.reload()
+        return deleted
 
 
 async def _active_for_update(session: AsyncSession, document_id: int) -> Document:
