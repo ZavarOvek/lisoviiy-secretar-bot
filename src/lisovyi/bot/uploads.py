@@ -388,6 +388,10 @@ class UploadDialogue:
             title=saved.title,
             place=human_place(saved.kind, saved.scope),
         )
+        if pending.candidate_id is None:
+            # Звіра не питали «Замінити стару?»: підказати, навіщо кнопка нижче. Якщо він
+            # щойно сам вибрав «Залишити обидві», пояснення зайве.
+            text += "\n\n" + texts.SAVED_NEW_HINT
         await _send(
             bot, pending.chat_id, text, _keyboard(pending, [(texts.OTHER_VERSION, "other")])
         )

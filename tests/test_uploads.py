@@ -147,7 +147,12 @@ async def test_new_beast_sends_a_file_names_itself_and_the_advice_is_saved(world
 
     sent = world.session.texts()
     assert "Приємно познайомитись, Їжак Колючий!" in sent
-    assert sent[-1] == "Дякую, Їжак Колючий! Записав пораду «порада» для рукавички «Під вербою»."
+    # Кандидата на заміну не було: під записом — підказка до кнопки «Це нова версія…».
+    assert sent[-1] == (
+        "Дякую, Їжак Колючий! Записав пораду «порада» для рукавички «Під вербою».\n\n"
+        "Якщо це нова версія поради, яка вже є, натисніть кнопку нижче — "
+        "і звірі бачитимуть вашу замість старої."
+    )
     assert world.questions.calls == []
     assert world.session.sent(SendChatAction)[0].action == "upload_document"
     [saved] = await documents(world, filename="порада.txt")
@@ -352,10 +357,18 @@ async def test_similar_advice_offers_replacement_and_separate_keeps_both(world):
     await send_file(world, "без_місця.txt", NO_PLACE.encode())
     await press(world, "Хвойний ліс")
     assert last_text(world) == (
-        "Схоже, це нова версія поради «Що їсти в хвойному лісі» (хвойного лісу). Замінити її?"
+        "Схоже, це нова версія поради «Що їсти в хвойному лісі» (хвойного лісу).\n\n"
+        "• Замінити стару — звірі бачитимуть лише вашу версію. "
+        "Якщо потім видалите її через /my, стара повернеться.\n"
+        "• Залишити обидві — звірі бачитимуть обидві поради."
     )
+    message = world.session.sent(SendMessage)[-1]
+    labels = [b.text for row in message.reply_markup.inline_keyboard for b in row]
+    assert labels == ["Замінити стару", "Залишити обидві"]
     await press(world, texts.SEPARATE)
+    # Звір сам вибрав «Залишити обидві»: підказка зайва, кнопка «Це нова версія…» лишається.
     assert last_text(world) == "Дякую, Їжак Колючий! Записав пораду «без_місця» для хвойного лісу."
+    assert world.session.sent(SendMessage)[-1].reply_markup is not None
     [old] = await documents(world, filename="Що їсти в хвойному лісі.txt")
     assert old.status == DocumentStatus.ACTIVE
 
@@ -364,8 +377,10 @@ async def test_new_version_replaces_the_old_document(world):
     await registered(world)
     await send_file(world, "гриби_нова_версія.txt", MUSHROOMS.encode())
     assert last_text(world) == (
-        "Схоже, це нова версія поради «Грибний путівник хвойного лісу» (хвойного лісу). "
-        "Замінити її?"
+        "Схоже, це нова версія поради «Грибний путівник хвойного лісу» (хвойного лісу).\n\n"
+        "• Замінити стару — звірі бачитимуть лише вашу версію. "
+        "Якщо потім видалите її через /my, стара повернеться.\n"
+        "• Залишити обидві — звірі бачитимуть обидві поради."
     )
     await press(world, texts.REPLACE)
     assert last_text(world) == (
@@ -398,7 +413,14 @@ async def test_other_version_button_rebinds_the_new_advice(world):
     await send_file(world, "порада.txt", VERBA_ADVICE.encode())
     await press(world, texts.OTHER_VERSION)
     message = world.session.sent(SendMessage)[-1]
-    assert message.text == texts.PICK_OTHER
+    assert (
+        message.text
+        == texts.PICK_OTHER
+        == (
+            "Новою версією якої поради є ваша? Оберіть її — і звірі бачитимуть вашу замість неї. "
+            "Якщо потім видалите свою через /my, та повернеться."
+        )
+    )
     labels = [row[0].text for row in message.reply_markup.inline_keyboard]
     verba = {
         d.title
