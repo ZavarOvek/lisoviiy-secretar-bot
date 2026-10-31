@@ -4,6 +4,7 @@ import logging
 import re
 import unicodedata
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -16,6 +17,9 @@ from lisovyi.ingest.forest_map import parse_forest_map
 from lisovyi.ingest.importer import rebuild_forest_map
 from lisovyi.ingest.parsers import Extracted
 from lisovyi.search.service import SearchService
+
+if TYPE_CHECKING:
+    from lisovyi.notify import Notifier
 
 log = logging.getLogger(__name__)
 
@@ -77,9 +81,16 @@ def valid_name(raw: str) -> str | None:
 
 
 class UploadService:
-    def __init__(self, sessionmaker: async_sessionmaker[AsyncSession], search: SearchService):
+    def __init__(
+        self,
+        sessionmaker: async_sessionmaker[AsyncSession],
+        search: SearchService,
+        notifier: "Notifier | None" = None,
+    ):
+        """`notifier` — розсилка підписникам (notify.Notifier); None — без сповіщень."""
         self._sessionmaker = sessionmaker
         self.search = search
+        self.notifier = notifier
 
     # --- звірі
 
@@ -163,6 +174,9 @@ class UploadService:
             replaces,
         )
         await self.search.reload()
+        if self.notifier is not None:
+            # Після коміту й перебудови пошуку: підписник, що спитає одразу, побачить пораду.
+            self.notifier.document_saved(saved, beast)
         return saved
 
     async def _save_once(
@@ -315,6 +329,8 @@ class UploadService:
                 "gloves with active documents are not on the new map: %s", ", ".join(orphans)
             )
         await self.search.reload()
+        if self.notifier is not None:
+            self.notifier.map_replaced(beast)
         return orphans
 
     async def delete(self, beast: BeastInfo, document_id: int) -> DeletedDocument:
