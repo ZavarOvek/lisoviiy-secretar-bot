@@ -233,3 +233,5 @@ docker compose start bot
 - Дані — PostgreSQL: документи зі статусами `active` / `replaced` / `deleted`, звірі, підписки, Карта лісу.
 
 Докладно, зі шляхом питання й поради та числами за рішеннями: [docs/architecture.md](docs/architecture.md).
+
+Як бот створювався етап за етапом, з поворотами й перевірками: [docs/process.md](docs/process.md).
