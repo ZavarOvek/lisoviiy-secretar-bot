@@ -1,0 +1,49 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install ruff==0.17.3
+      - run: ruff check .
+      - run: ruff format --check .
+
+  test:
+    name: pytest
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: postgres:17
+        env:
+          POSTGRES_USER: lisovyi
+          POSTGRES_PASSWORD: lisovyi
+          POSTGRES_DB: lisovyi
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U lisovyi" --health-interval 2s
+          --health-timeout 5s --health-retries 30
+    env:
+      DATABASE_URL: postgresql+asyncpg://lisovyi:lisovyi@localhost:5432/lisovyi_test
+      POSTGRES_USER: lisovyi
+      POSTGRES_PASSWORD: lisovyi
+      POSTGRES_DB: lisovyi
+      TELEGRAM_BOT_TOKEN: ""
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-ukr
+      - run: tesseract --list-langs | grep -qx ukr
+      - run: pip install -e ".[dev]"
+      - run: pytest -q -rs
