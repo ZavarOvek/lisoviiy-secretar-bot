@@ -1,5 +1,11 @@
 # Лісовий секретар
 
+Українська | [English](README.en.md)
+
+[![CI](https://github.com/ZavarOvek/lisoviiy-secretar-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/ZavarOvek/lisoviiy-secretar-bot/actions/workflows/ci.yml)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/downloads/)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+
 ## Контекст
 
 Це тестове завдання Broscorp на позицію Junior Python Developer, і оцінюють у ньому якість бота та повноту зібраних вимог. Замовниця тут персонаж у Telegram, Мишка-шкряботушка: це бот, з яким розробник провів інтерв'ю, щоб зібрати вимоги. Світ завдання узято з української казки "Рукавичка": ліс із вісьмома рукавичками-домівками, у кожній з яких живуть по три звірі. Ліс поділено на хвойну й листяну частини та місця біля річки, і це описує документ "Карта лісу". Звірі мають "Лісовий архів", 78 порад у файлах TXT, DOCX і PDF (19 з них скани), а бот відповідає за цими документами та приймає нові поради. У розділі про вимоги позначка [М] означає, що вимогу сформулювала сама Мишка, а [Р] позначає рішення розробника, яке вона погодила.
