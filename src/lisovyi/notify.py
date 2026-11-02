@@ -103,7 +103,7 @@ class Notifier:
             log.info("chat %d blocked the bot: unsubscribing it", chat_id)
             try:
                 await self.unsubscribe(chat_id)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 # Збій БД тут не має зупинити розсилку решті підписників.
                 log.warning("chat %d: unsubscribe failed: %s", chat_id, type(exc).__name__)
         except TelegramRetryAfter as exc:
@@ -112,7 +112,8 @@ class Notifier:
                 return
             await self._sleep(exc.retry_after)
             await self._send(chat_id, text, retried=True)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
+            # Збій для одного чату (мережа, вилучений чат) не має зупиняти розсилку решті.
             log.warning("chat %d: notification failed: %s", chat_id, type(exc).__name__)
 
     def _spawn(self, coroutine: Coroutine[Any, Any, None]) -> None:

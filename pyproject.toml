@@ -40,11 +40,20 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RUF", "BLE", "SLF"]
+ignore = [
+    # RUF001-003 сприймають кириличні літери як "схожі" на латинські. У проєкті
+    # українською це хибні спрацювання за задумом.
+    "RUF001",
+    "RUF002",
+    "RUF003",
+]
 
 [tool.ruff.lint.per-file-ignores]
 # Системний промпт — дослівний текст із брифу, його рядки не переносяться.
 "src/lisovyi/answer/prompt.py" = ["E501"]
+# Тести законно звертаються до приватних членів об'єктів, які перевіряють.
+"tests/*" = ["SLF001"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

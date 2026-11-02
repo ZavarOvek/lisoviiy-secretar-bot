@@ -226,7 +226,8 @@ async def _notify_quietly(notify: Notify, text: str) -> None:
     # Проміжне повідомлення — лише ввічливість: якщо воно не дійшло, відповідь усе одно буде.
     try:
         await notify(text)
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001
+        # Будь-який збій відправки (Telegram, мережа) лише логуємо: відповідь звірові важливіша.
         log.warning("intermediate message failed: %s", type(error).__name__)
 
 

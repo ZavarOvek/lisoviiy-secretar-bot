@@ -312,7 +312,7 @@ def test_my_chunks_respect_length_and_count():
             "Під дубом",
             1,
             "Їжак",
-            datetime(2026, 10, 31, tzinfo=UTC),  # fmt: skip
+            datetime(2026, 10, 31, tzinfo=UTC),
         )
         for i in range(30)
     ]

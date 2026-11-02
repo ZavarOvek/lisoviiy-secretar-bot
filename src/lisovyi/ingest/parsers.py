@@ -118,7 +118,8 @@ def _table_lines(table: Table) -> list[str]:
         cells: list[_Cell] = []
         for cell in row.cells:
             # Об'єднана клітинка повторюється в row.cells для кожної колонки, яку займає.
-            if not cells or cell._tc is not cells[-1]._tc:
+            # Публічного способу порівняти клітинки в python-docx немає, тож беремо XML-елемент.
+            if not cells or cell._tc is not cells[-1]._tc:  # noqa: SLF001
                 cells.append(cell)
         lines.append(" | ".join(_cell_text(cell) for cell in cells))
     return lines
