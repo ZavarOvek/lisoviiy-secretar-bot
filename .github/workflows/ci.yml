@@ -5,10 +5,14 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: ruff
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -21,6 +25,7 @@ jobs:
   test:
     name: pytest
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       db:
         image: postgres:17
@@ -46,4 +51,9 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-ukr
       - run: tesseract --list-langs | grep -qx ukr
       - run: pip install -e ".[dev]"
-      - run: pytest -q -rs
+      # Пропущений тест у CI означає, що бракує бази чи tesseract: такий прогін має падати.
+      - name: pytest, no skips allowed
+        shell: bash
+        run: |
+          pytest -q -rs | tee pytest.out
+          ! grep -qi "skipped" pytest.out
