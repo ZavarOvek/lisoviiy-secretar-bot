@@ -5,8 +5,17 @@ from typing import Any
 
 from aiogram import Dispatcher
 from aiogram.client.session.base import BaseSession
-from aiogram.methods import GetMe, SendMessage, TelegramMethod
-from aiogram.types import CallbackQuery, Chat, Document, Message, PhotoSize, Update, User
+from aiogram.methods import GetChat, GetMe, SendMessage, TelegramMethod
+from aiogram.types import (
+    CallbackQuery,
+    Chat,
+    ChatFullInfo,
+    Document,
+    Message,
+    PhotoSize,
+    Update,
+    User,
+)
 
 from lisovyi.bot.groups import groups_router
 from lisovyi.bot.private import private_router
@@ -29,6 +38,10 @@ class RecordingSession(BaseSession):
         if isinstance(method, GetMe):
             # Command-фільтр звіряє «/start@бот» з іменем бота.
             return User(id=1, is_bot=True, first_name="Лісовий секретар", username="LisoviyTestBot")
+        if isinstance(method, GetChat):
+            # aiogram >= 3.32 читає з getChat додаткові імена бота (active_usernames).
+            # model_construct: обов'язкові поля ChatFullInfo змінюються між версіями aiogram.
+            return ChatFullInfo.model_construct(id=method.chat_id, type="private")
         if isinstance(method, SendMessage):
             return Message(
                 message_id=len(self.requests),

@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 from aiogram import Bot
-from aiogram.methods import AnswerCallbackQuery, GetMe, SendMessage
+from aiogram.methods import AnswerCallbackQuery, GetChat, GetMe, SendMessage
 from aiogram.types import Chat, Message, Update
 from telegram_fakes import (
     DISPATCHER,
@@ -39,7 +39,7 @@ def session():
 
 
 async def feed(session: RecordingSession, update: Update) -> list:
-    """Подає оновлення; повертає запити бота, крім GetMe (ним Command звіряє «@бот»)."""
+    """Подає оновлення; повертає запити бота, крім GetMe і GetChat (ними Command звіряє «@бот»)."""
     await DISPATCHER.feed_update(
         Bot("42:TEST", session=session),
         update,
@@ -49,7 +49,7 @@ async def feed(session: RecordingSession, update: Update) -> list:
         library=Forbidden("library"),
         notifier=Forbidden("notifier"),
     )
-    return [request for request in session.requests if not isinstance(request, GetMe)]
+    return [request for request in session.requests if not isinstance(request, (GetMe, GetChat))]
 
 
 def test_private_only_text():
